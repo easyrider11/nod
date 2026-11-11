@@ -63,6 +63,10 @@ final class ChatMessageItem {
     required this.text,
     required this.createdAt,
     this.clientMessageId,
+    this.turnId,
+    this.replyToMessageId,
+    this.reaction,
+    this.answerChoices,
     this.attachments = const [],
     this.isPending = false,
     this.isStreaming = false,
@@ -76,11 +80,19 @@ final class ChatMessageItem {
       text: message.text,
       createdAt: message.createdAt,
       attachments: message.attachments,
+      turnId: message.turnId,
+      replyToMessageId: message.replyToMessageId,
+      reaction: message.reaction,
+      answerChoices: message.answerChoices,
     );
   }
 
   final String id;
   final String? clientMessageId;
+  final String? turnId;
+  final String? replyToMessageId;
+  final String? reaction;
+  final NodAnswerChoices? answerChoices;
   final List<NodArtifact> attachments;
   final NodMessageRole role;
   final String text;
@@ -101,6 +113,10 @@ final class ChatMessageItem {
       text: text ?? this.text,
       createdAt: createdAt,
       attachments: attachments,
+      turnId: turnId,
+      replyToMessageId: replyToMessageId,
+      reaction: reaction,
+      answerChoices: answerChoices,
       isPending: isPending ?? this.isPending,
       isStreaming: isStreaming ?? this.isStreaming,
     );

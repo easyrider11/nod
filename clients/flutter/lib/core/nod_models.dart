@@ -46,11 +46,21 @@ final class NodMessage {
     required this.text,
     required this.createdAt,
     this.clientMessageId,
+    this.turnId,
+    this.replyToMessageId,
+    this.reaction,
+    this.answerChoices,
+    this.answerChoicesPending = false,
     this.attachments = const [],
   });
 
   final String id;
   final String? clientMessageId;
+  final String? turnId;
+  final String? replyToMessageId;
+  final String? reaction;
+  final NodAnswerChoices? answerChoices;
+  final bool answerChoicesPending;
   final List<NodArtifact> attachments;
   final NodMessageRole role;
   final String text;
@@ -62,15 +72,72 @@ final class NodState {
     required this.messages,
     required this.turn,
     required this.revision,
+    this.threadId,
+    this.pendingAnswerChoiceMessageIds = const [],
+    this.verificationRequests = const [],
     this.hiddenMessageIds = const [],
     this.hiddenMessageCount = 0,
   });
 
   final List<NodMessage> messages;
+  final String? threadId;
+  final List<String> pendingAnswerChoiceMessageIds;
+  final List<NodVerificationRequest> verificationRequests;
   final NodTurnState turn;
   final String revision;
   final List<String> hiddenMessageIds;
   final int hiddenMessageCount;
+}
+
+final class NodAnswerChoice {
+  const NodAnswerChoice({
+    required this.id,
+    required this.label,
+    this.description,
+  });
+
+  final String id;
+  final String label;
+  final String? description;
+
+  String get answerText {
+    final detail = description?.trim();
+    return detail != null &&
+            detail.isNotEmpty &&
+            detail.toLowerCase() != label.trim().toLowerCase()
+        ? '${label.trim()}: $detail'
+        : label.trim();
+  }
+}
+
+final class NodAnswerChoices {
+  const NodAnswerChoices({required this.options, required this.multiple});
+
+  final List<NodAnswerChoice> options;
+  final bool multiple;
+}
+
+final class NodVerificationRequest {
+  const NodVerificationRequest({
+    required this.id,
+    required this.turnId,
+    required this.kind,
+  });
+
+  final String id;
+  final String turnId;
+  final String kind;
+}
+
+abstract interface class NodReplyRepository {
+  Future<void> sendReply(
+    String text, {
+    required String clientMessageId,
+    required String threadId,
+    required String replyToMessageId,
+    List<String>? choiceIds,
+    bool customAnswer = false,
+  });
 }
 
 final class NodHistory {

@@ -63,6 +63,46 @@ test('Flutter client fixtures match the shared server contract', async () => {
   assert.deepEqual(clientStopResponseSchema.parse({ ok: true }), { ok: true });
 });
 
+test('native question state and addressed replies preserve the server contract', async () => {
+  const state = clientStateSchema.parse(await fixture('state.json'));
+  const message = state.messages[1]!;
+  const choiceId = 'c5ed5115-813d-4d3d-a6ce-94b6d36ce004';
+  const question = {
+    ...message,
+    answerChoices: {
+      options: [{ id: choiceId, label: 'Use the draft', description: 'Keep it private' }],
+      multiple: false,
+    },
+    answerChoicesPending: true,
+  };
+  const parsed = clientStateSchema.parse({
+    ...state,
+    messages: [question],
+    pendingAnswerChoiceMessageIds: [question.id],
+  });
+  assert.deepEqual(parsed.messages[0]!.answerChoices, question.answerChoices);
+  const reply = {
+    text: 'Use the draft: Keep it private',
+    threadId: state.threadId,
+    clientMessageId: choiceId,
+    replyToMessageId: question.id,
+    questionAnswer: { choiceIds: [choiceId] },
+  };
+  assert.deepEqual(clientSendRequestSchema.parse(reply), reply);
+  assert.equal(
+    clientSendRequestSchema.safeParse({ ...reply, replyToMessageId: undefined }).success,
+    false,
+  );
+  assert.equal(
+    clientSendRequestSchema.safeParse({ ...reply, questionAnswer: { approved: true } }).success,
+    false,
+  );
+  assert.equal(
+    clientSendRequestSchema.safeParse({ ...reply, questionAnswer: { custom: true } }).success,
+    true,
+  );
+});
+
 test('native send contract accepts attachment-only messages but rejects empty and invalid attachment payloads', () => {
   const base = {
     text: '',

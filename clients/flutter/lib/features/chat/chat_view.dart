@@ -29,11 +29,17 @@ class NodChat extends StatefulWidget {
     this.active = true,
     this.voiceDraft,
     this.pickAttachments,
+    this.privateRequestBuilder,
     super.key,
   });
 
   final Future<List<NodUploadFile>> Function()? pickAttachments;
 
+  final Widget Function(
+    BuildContext context,
+    List<NodVerificationRequest> requests,
+  )?
+  privateRequestBuilder;
   final NodRepository repository;
   final bool autofocus;
   final bool active;
@@ -569,6 +575,26 @@ class _NodChatState extends State<NodChat>
                         ],
                       ),
                     ),
+                  if (widget.privateRequestBuilder != null)
+                    widget.privateRequestBuilder!(
+                      context,
+                      _controller.verificationRequests,
+                    ),
+                  if (_controller.replyTarget case final target?)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.reply),
+                      title: Text(
+                        target.text,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Cancel reply',
+                        onPressed: _controller.clearReply,
+                        icon: const Icon(Icons.close),
+                      ),
+                    ),
                   _Composer(
                     boundsKey: _composerBoundsKey,
                     voice: _voice,
@@ -698,21 +724,54 @@ class _Conversation extends StatelessWidget {
           return Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 760),
-              child: _MessageBubble(
-                key: ValueKey(message.id),
-                active: active,
-                message: message,
-                flightTargetKey:
-                    (message.clientMessageId ?? message.id) == flightId
-                    ? flightTargetKey
-                    : null,
-                streaming:
-                    message.isStreaming &&
-                    controller.failure == null &&
-                    controller.question == null &&
-                    (controller.turn == NodTurnState.queued ||
-                        controller.turn == NodTurnState.running),
-                attachmentsRepository: attachmentsRepository,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _MessageBubble(
+                    key: ValueKey(message.id),
+                    active: active,
+                    message: message,
+                    flightTargetKey:
+                        (message.clientMessageId ?? message.id) == flightId
+                        ? flightTargetKey
+                        : null,
+                    streaming:
+                        message.isStreaming &&
+                        controller.failure == null &&
+                        controller.question == null &&
+                        (controller.turn == NodTurnState.queued ||
+                            controller.turn == NodTurnState.running),
+                    attachmentsRepository: attachmentsRepository,
+                  ),
+                  if (message.replyToMessageId != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        'Reply to ${controller.messages.where((item) => item.id == message.replyToMessageId).firstOrNull?.text ?? 'earlier message'}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  if (controller.hasChoices(message))
+                    _AnswerChoices(
+                      key: ValueKey('choices-${message.id}'),
+                      message: message,
+                      controller: controller,
+                    ),
+                  if (message.role == NodMessageRole.assistant &&
+                      !message.isStreaming)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: controller.canCompose
+                            ? () => controller.replyTo(message)
+                            : null,
+                        icon: const Icon(Icons.reply, size: 16),
+                        label: const Text('Reply'),
+                      ),
+                    ),
+                ],
               ),
             ),
           );
@@ -1113,6 +1172,86 @@ class _FailureBanner extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _AnswerChoices extends StatefulWidget {
+  const _AnswerChoices({
+    required this.message,
+    required this.controller,
+    super.key,
+  });
+
+  final ChatMessageItem message;
+  final ChatController controller;
+
+  @override
+  State<_AnswerChoices> createState() => _AnswerChoicesState();
+}
+
+class _AnswerChoicesState extends State<_AnswerChoices> {
+  final Set<String> _selected = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final choices = widget.message.answerChoices!;
+    final enabled =
+        widget.controller.canCompose &&
+        widget.controller.connection.phase == NodConnectionPhase.connected;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final option in choices.options)
+            if (choices.multiple)
+              CheckboxListTile(
+                value: _selected.contains(option.id),
+                title: Text(option.label),
+                subtitle: option.description == null
+                    ? null
+                    : Text(option.description!),
+                onChanged: enabled
+                    ? (value) => setState(() {
+                        value == true
+                            ? _selected.add(option.id)
+                            : _selected.remove(option.id);
+                      })
+                    : null,
+              )
+            else
+              OutlinedButton(
+                key: ValueKey('answer-${option.id}'),
+                onPressed: enabled
+                    ? () => unawaited(
+                        widget.controller.answerChoices(widget.message, [
+                          option.id,
+                        ]),
+                      )
+                    : null,
+                child: Text(option.answerText),
+              ),
+          if (choices.multiple)
+            FilledButton(
+              onPressed: enabled && _selected.isNotEmpty
+                  ? () => unawaited(
+                      widget.controller.answerChoices(
+                        widget.message,
+                        _selected.toList(),
+                      ),
+                    )
+                  : null,
+              child: const Text('Send selected answers'),
+            ),
+          TextButton(
+            onPressed: enabled
+                ? () => widget.controller.replyTo(widget.message)
+                : null,
+            child: const Text('Write an answer'),
+          ),
+        ],
       ),
     );
   }

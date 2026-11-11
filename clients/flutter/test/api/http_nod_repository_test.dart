@@ -22,6 +22,315 @@ void main() {
     token: token,
   );
 
+  test('addressed question replies preserve choices, retries, stale and reset fencing', () async {
+    final events = EventConnection();
+    const questionId = '538a7c2d-a2a1-42a3-bc84-c98b777d87cc';
+    const firstId = 'c5ed5115-813d-4d3d-a6ce-94b6d36ce004';
+    const secondId = 'c5ed5115-813d-4d3d-a6ce-94b6d36ce005';
+    var waiting = true;
+    var failFirst = true;
+    var reset = false;
+    final writes = <Map<Object?, Object?>>[];
+    final accepted = <String>{};
+    var dispatches = 0;
+    Map<String, Object?> state() => {
+      ..._state(
+        messages: [
+          {
+            ..._message(questionId, null, 'Which draft?'),
+            'role': 'assistant',
+            'turnId': 'task-turn',
+            'answerChoices': {
+              'multiple': true,
+              'options': [
+                {
+                  'id': firstId,
+                  'label': 'First',
+                  'description': 'Private draft',
+                },
+                {'id': secondId, 'label': 'Second'},
+              ],
+            },
+            'answerChoicesPending': waiting,
+          },
+        ],
+      ),
+      'threadId': reset ? 'replacement-thread' : 'original-thread',
+      'pendingAnswerChoiceMessageIds': waiting ? [questionId] : <String>[],
+      'verificationRequests': [
+        {'id': firstId, 'turnId': 'task-turn', 'kind': 'otp'},
+      ],
+    };
+    final client = RoutingClient((request) async {
+      expect(request.headers['Authorization'], 'Bearer $token');
+      if (request.method == 'POST' && request.url.path == '/api/messages') {
+        final body =
+            jsonDecode(utf8.decode(await request.finalize().toBytes())) as Map;
+        writes.add(body);
+        if (body['threadId'] != 'original-thread' ||
+            body['replyToMessageId'] != questionId) {
+          return _jsonResponse(409, {'code': 'conversation_reset'});
+        }
+        if (accepted.contains(body['clientMessageId'])) {
+          return _jsonResponse(200, {'ok': true});
+        }
+        if (!waiting) {
+          return _jsonResponse(409, {'code': 'question_unavailable'});
+        }
+        expect(body['text'], 'First: Private draft\nSecond');
+        expect(body['questionAnswer'], {
+          'choiceIds': [firstId, secondId],
+        });
+        accepted.add(body['clientMessageId'] as String);
+        dispatches++;
+        waiting = false;
+        if (failFirst) {
+          failFirst = false;
+          throw const SocketException('synthetic lost receipt');
+        }
+        return _jsonResponse(200, {'ok': true});
+      }
+      return switch (request.url.path) {
+        '/api/client/capabilities' => _jsonResponse(200, _capabilities()),
+        '/api/session' => _jsonResponse(200, _session()),
+        '/api/state' => _jsonResponse(200, state()),
+        '/api/messages' => _jsonResponse(200, {
+          'messages': state()['messages'],
+        }),
+        _ => _jsonResponse(404, {'error': 'not found'}),
+      };
+    });
+    final repository = HttpNodRepository(
+      credentials: MemoryCredentials(),
+      client: client,
+      eventClientFactory: () => events.client,
+    );
+    addTearDown(repository.dispose);
+    await repository.connect(config);
+    final controller = ChatController(repository);
+    addTearDown(controller.dispose);
+    await controller.start();
+    final question = controller.messages.single;
+    expect(question.turnId, 'task-turn');
+    expect(controller.verificationRequests.single.kind, 'otp');
+    expect(controller.hasChoices(question), isTrue);
+    expect(
+      await controller.answerChoices(question, [secondId, firstId]),
+      isFalse,
+    );
+    expect(
+      await controller.answerChoices(question, [secondId, firstId]),
+      isTrue,
+    );
+    expect(writes[0]['clientMessageId'], writes[1]['clientMessageId']);
+    expect(dispatches, 1);
+    expect(controller.hasChoices(question), isFalse);
+    expect(await controller.answerChoices(question, [firstId]), isFalse);
+    controller.replyTo(question);
+    expect(await controller.sendText('Different answer'), isFalse);
+    expect(writes.last['questionAnswer'], {'custom': true});
+    expect(dispatches, 1);
+    reset = true;
+    events.add({'type': 'refresh'});
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(controller.replyTarget, isNull);
+    expect(controller.messages.where((message) => message.isPending), isEmpty);
+  });
+
+  test('declined approval and check-in replies are addressed text, never choice approvals', () async {
+    final events = EventConnection();
+    final writes = <Map<Object?, Object?>>[];
+    final client = RoutingClient((request) async {
+      if (request.method == 'POST' && request.url.path == '/api/messages') {
+        writes.add(
+          jsonDecode(utf8.decode(await request.finalize().toBytes())) as Map,
+        );
+        return _jsonResponse(200, {'ok': true});
+      }
+      return switch (request.url.path) {
+        '/api/client/capabilities' => _jsonResponse(200, _capabilities()),
+        '/api/session' => _jsonResponse(200, _session()),
+        '/api/state' => _jsonResponse(200, _state()),
+        _ => _jsonResponse(404, {'error': 'not found'}),
+      };
+    });
+    final repository = HttpNodRepository(
+      credentials: MemoryCredentials(),
+      client: client,
+      eventClientFactory: () => events.client,
+    );
+    addTearDown(repository.dispose);
+    await repository.connect(config);
+    await repository.sendReply(
+      'No, stop this task',
+      clientMessageId: 'decline',
+      threadId: 'thread-1',
+      replyToMessageId: 'approval-question',
+    );
+    await repository.sendReply(
+      'Keep going',
+      clientMessageId: 'continue',
+      threadId: 'thread-1',
+      replyToMessageId: 'check-in-question',
+    );
+    expect(writes.map((body) => body['replyToMessageId']), [
+      'approval-question',
+      'check-in-question',
+    ]);
+    expect(writes.every((body) => !body.containsKey('questionAnswer')), isTrue);
+  });
+
+  test('browser handoff decodes split frames and disconnect cancels without credentials in URL', () async {
+    final events = EventConnection();
+    final chunks = StreamController<List<int>>();
+    var cancelled = false;
+    chunks.onCancel = () {
+      cancelled = true;
+    };
+    final client = RoutingClient(
+      (request) async => switch (request.url.path) {
+        '/api/client/capabilities' => _jsonResponse(200, _capabilities()),
+        '/api/session' => _jsonResponse(200, _session()),
+        '/api/state' => _jsonResponse(200, _state()),
+        _ => _jsonResponse(404, {}),
+      },
+    );
+    final opened = Completer<void>();
+    final repository = HttpNodRepository(
+      credentials: MemoryCredentials(),
+      client: client,
+      eventClientFactory: () => events.client,
+      browserClientFactory: () => RoutingClient((request) async {
+        expect(request.url.origin, config.origin.toString());
+        expect(request.url.queryParameters, {
+          'turnId': '538a7c2d-a2a1-42a3-bc84-c98b777d87cc',
+        });
+        expect(request.headers['Authorization'], 'Bearer $token');
+        expect(request.followRedirects, isFalse);
+        opened.complete();
+        return http.StreamedResponse(chunks.stream, 200);
+      }),
+    );
+    addTearDown(repository.dispose);
+    await repository.connect(config);
+    final frames = <List<int>>[];
+    final done = Completer<void>();
+    repository
+        .browserHandoffFrames('538a7c2d-a2a1-42a3-bc84-c98b777d87cc')
+        .listen(frames.add, onDone: done.complete);
+    await opened.future;
+    chunks.add([0, 0]);
+    chunks.add([0, 3, 1]);
+    chunks.add([2, 3, 0, 0, 0, 1, 4]);
+    await Future<void>.delayed(Duration.zero);
+    expect(frames, [
+      [1, 2, 3],
+      [4],
+    ]);
+    await repository.disconnect();
+    await done.future;
+    expect(cancelled, isTrue);
+    await chunks.close();
+  });
+
+  for (final bytes in [
+    [0, 128, 0, 1],
+    [0, 0, 0, 0],
+    [0, 0, 0, 4, 1],
+  ]) {
+    test(
+      'browser handoff rejects oversized, empty or truncated frames $bytes',
+      () async {
+        final events = EventConnection();
+        final client = RoutingClient(
+          (request) async => switch (request.url.path) {
+            '/api/client/capabilities' => _jsonResponse(200, _capabilities()),
+            '/api/session' => _jsonResponse(200, _session()),
+            '/api/state' => _jsonResponse(200, _state()),
+            _ => _jsonResponse(404, {}),
+          },
+        );
+        final repository = HttpNodRepository(
+          credentials: MemoryCredentials(),
+          client: client,
+          eventClientFactory: () => events.client,
+          browserClientFactory: () => RoutingClient(
+            (_) async => http.StreamedResponse(Stream.value(bytes), 200),
+          ),
+        );
+        addTearDown(repository.dispose);
+        await repository.connect(config);
+        await expectLater(
+          repository.browserHandoffFrames(
+            '538a7c2d-a2a1-42a3-bc84-c98b777d87cc',
+          ),
+          emitsError(isA<NodProtocolException>()),
+        );
+      },
+    );
+  }
+
+  test('authenticated JSON never follows a redirect carrying private request values', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final other = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+      await other.close(force: true);
+    });
+    var forwarded = 0;
+    other.listen((request) async {
+      forwarded++;
+      await request.drain<void>();
+      await request.response.close();
+    });
+    server.listen((request) async {
+      expect(request.headers.value('authorization'), 'Bearer $token');
+      if (request.uri.path == '/api/private-fixture') {
+        expect(
+          await utf8.decoder.bind(request).join(),
+          '{"value":"synthetic-private-value"}',
+        );
+        request.response.statusCode = 307;
+        request.response.headers.set(
+          'location',
+          'http://127.0.0.1:${other.port}/api/private-fixture',
+        );
+        await request.response.close();
+        return;
+      }
+      final body = switch (request.uri.path) {
+        '/api/client/capabilities' => _capabilities(),
+        '/api/session' => _session(),
+        '/api/state' => _state(),
+        _ => <String, Object?>{},
+      };
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode(body));
+      await request.response.close();
+    });
+    final events = EventConnection();
+    final repository = HttpNodRepository(
+      credentials: MemoryCredentials(),
+      eventClientFactory: () => events.client,
+    );
+    addTearDown(repository.dispose);
+    await repository.connect(
+      NodConnectionConfig(
+        origin: Uri.parse('http://127.0.0.1:${server.port}'),
+        token: token,
+      ),
+    );
+    await expectLater(
+      repository.requestJson(
+        'POST',
+        '/api/private-fixture',
+        body: {'value': 'synthetic-private-value'},
+      ),
+      throwsA(isA<NodRequestException>()),
+    );
+    expect(forwarded, 0);
+  });
+
   test('feature transport refuses off-origin and non-API destinations', () {
     final repository = HttpNodRepository(credentials: MemoryCredentials());
     addTearDown(repository.dispose);
@@ -1457,6 +1766,7 @@ final class EventConnection {
       },
     );
     client = RoutingClient((request) async {
+      expect(request.followRedirects, isFalse);
       if (expectedAuthorization != null) {
         authorizationMatches =
             request.headers['Authorization'] == expectedAuthorization;

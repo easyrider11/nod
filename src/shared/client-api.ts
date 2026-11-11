@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { answerChoicesSchema, questionAnswerSchema, type QuestionAnswer } from './answer-choices';
 import type { SessionResponse } from './account';
 import type {
   Activity,
@@ -26,6 +27,9 @@ export type ClientMessage = Pick<
   | 'streamId'
   | 'reaction'
   | 'replyToMessageId'
+  | 'answerChoices'
+  | 'answerChoicesPending'
+  | 'reactions'
 >;
 export type ClientState = Omit<
   Pick<
@@ -64,6 +68,8 @@ export interface ClientSendRequest {
   text: string;
   clientMessageId: string;
   threadId: string;
+  replyToMessageId?: string;
+  questionAnswer?: QuestionAnswer;
 }
 export interface ClientStopResponse {
   ok: true;
@@ -91,6 +97,11 @@ export const clientMessageSchema: z.ZodType<ClientMessage> = z.looseObject({
   streamId: z.string().nullable().optional(),
   reaction: z.string().nullable().optional(),
   replyToMessageId: z.uuid().nullable().optional(),
+  answerChoices: answerChoicesSchema.optional(),
+  answerChoicesPending: z.boolean().optional(),
+  reactions: z
+    .array(z.object({ actor: z.enum(['user', 'assistant']), reaction: z.string() }))
+    .optional(),
 });
 
 export const clientTurnSchema: z.ZodType<Turn> = z.looseObject({
@@ -193,9 +204,12 @@ export const clientSendRequestSchema: z.ZodType<ClientSendRequest> = z
     attachmentIds: z.array(z.uuid()).optional(),
     clientMessageId: z.uuid(),
     threadId: z.uuid(),
+    replyToMessageId: z.uuid().optional(),
+    questionAnswer: questionAnswerSchema.optional(),
   })
   .strict()
-  .refine((value) => value.text.length > 0 || (value.attachmentIds?.length ?? 0) > 0);
+  .refine((value) => value.text.length > 0 || (value.attachmentIds?.length ?? 0) > 0)
+  .refine((value) => !value.questionAnswer || Boolean(value.replyToMessageId));
 
 export const clientSendResponseSchema: z.ZodType<ClientSendResponse> = z.looseObject({
   threadId: z.uuid(),
@@ -273,7 +287,14 @@ export const clientCapabilities: ClientCapabilities = {
       method: 'POST',
       path: '/api/messages',
       response: 'json',
-      body: ['text', 'attachmentIds', 'clientMessageId', 'threadId'],
+      body: [
+        'text',
+        'attachmentIds',
+        'clientMessageId',
+        'threadId',
+        'replyToMessageId',
+        'questionAnswer',
+      ],
     },
     stop: { method: 'POST', path: '/api/thread/stop', response: 'json' },
   },

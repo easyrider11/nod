@@ -27,6 +27,46 @@ final class ChatController extends ChangeNotifier {
   );
   NodTurnState _turn = NodTurnState.idle;
   ChatQuestion? _question;
+  String? _threadId;
+  ChatMessageItem? _replyTarget;
+  final Set<String> _pendingChoices = {};
+  List<NodVerificationRequest> _verificationRequests = const [];
+
+  ChatMessageItem? get replyTarget => _replyTarget;
+  List<NodVerificationRequest> get verificationRequests =>
+      _verificationRequests;
+  bool hasChoices(ChatMessageItem message) =>
+      _pendingChoices.contains(message.id) && message.answerChoices != null;
+
+  void replyTo(ChatMessageItem message) {
+    if (message.isPending || message.isStreaming) return;
+    _replyTarget = message;
+    _notify();
+  }
+
+  void clearReply() {
+    _replyTarget = null;
+    _notify();
+  }
+
+  Future<bool> answerChoices(ChatMessageItem message, List<String> ids) async {
+    if (!hasChoices(message) || !canCompose) return false;
+    final choices = message.answerChoices!;
+    final selected = choices.options
+        .where((option) => ids.contains(option.id))
+        .toList();
+    if (selected.isEmpty ||
+        selected.length != ids.toSet().length ||
+        (!choices.multiple && selected.length != 1)) {
+      return false;
+    }
+    return sendText(
+      selected.map((option) => option.answerText).join('\n'),
+      replyTarget: message,
+      choiceIds: selected.map((option) => option.id).toList(),
+    );
+  }
+
   ChatFailure? _failure;
   bool _isLoading = true;
   bool _isSending = false;
@@ -85,13 +125,26 @@ final class ChatController extends ChangeNotifier {
     String text, {
     List<NodArtifact> attachments = const [],
     NodUploadFile? recording,
+    ChatMessageItem? replyTarget,
+    List<String>? choiceIds,
   }) async {
     final normalized = text.trim();
     if ((normalized.isEmpty && attachments.isEmpty && recording == null) ||
         !canCompose) {
       return false;
     }
+    final target = replyTarget ?? _replyTarget;
+    final threadId = _threadId;
+    if (target != null &&
+        (threadId == null || attachments.isNotEmpty || recording != null)) {
+      return false;
+    }
+    final customAnswer = target?.answerChoices != null && choiceIds == null;
     final signature = jsonEncode([
+      threadId,
+      target?.id,
+      choiceIds,
+      customAnswer,
       normalized,
       recording?.path,
       attachments.map((file) => file.id).toList(),
@@ -117,11 +170,29 @@ final class ChatController extends ChangeNotifier {
     );
     _failure = null;
     _isSending = true;
-    _messages.add(pending);
+    if (_verificationRequests.isEmpty &&
+        !RegExp(r'^\d{3,8}$').hasMatch(normalized)) {
+      _messages.add(pending);
+    }
     _sortMessages();
     _notify();
     try {
-      if (recording != null) {
+      if (target != null) {
+        final repository = _repository;
+        if (repository is! NodReplyRepository) {
+          throw const NodRequestException();
+        }
+        await (repository as NodReplyRepository).sendReply(
+          normalized,
+          clientMessageId: clientMessageId,
+          threadId: threadId!,
+          replyToMessageId: target.id,
+          choiceIds: choiceIds,
+          customAnswer: customAnswer,
+        );
+        _pendingChoices.remove(target.id);
+        if (_replyTarget?.id == target.id) _replyTarget = null;
+      } else if (recording != null) {
         await (_repository as NodAudioRepository).sendAudio(
           normalized,
           recording,
@@ -169,6 +240,13 @@ final class ChatController extends ChangeNotifier {
         _retrySignature = null;
         _retryClientId = null;
       }
+      if (error is NodConflictException) {
+        _replyTarget = null;
+        _question = null;
+        try {
+          _applyState(await _repository.loadState());
+        } catch (_) {}
+      }
       final failure = _failureFrom(error);
       _failure = recording != null && failure.kind == ChatFailureKind.unknown
           ? ChatFailure(
@@ -207,6 +285,11 @@ final class ChatController extends ChangeNotifier {
     _notify();
     try {
       await _repository.stop();
+      _question = null;
+      _replyTarget = null;
+      _pendingChoices.clear();
+      _verificationRequests = const [];
+      _turn = NodTurnState.cancelled;
     } on Object catch (error) {
       _failure = _failureFrom(error);
     } finally {
@@ -275,8 +358,10 @@ final class ChatController extends ChangeNotifier {
         _applyState(state);
       case NodMessageEvent(:final message):
         _mergeMessages(<NodMessage>[message]);
-      case NodMessageDeltaEvent(:final messageId, :final text):
-        _appendDelta(messageId, text);
+      case NodMessageDeltaEvent(:final messageId, :final text, :final threadId):
+        if (threadId == null || _threadId == null || threadId == _threadId) {
+          _appendDelta(messageId, text);
+        }
       case NodActivityEvent(:final turn):
         _turn = turn;
         if (turn != NodTurnState.waiting) {
@@ -297,6 +382,23 @@ final class ChatController extends ChangeNotifier {
   }
 
   void _applyState(NodState state) {
+    if (_threadId != null &&
+        state.threadId != null &&
+        _threadId != state.threadId) {
+      _messages.clear();
+      _hiddenMessageIds.clear();
+      _historyOldest = null;
+      _historyVersion++;
+      _replyTarget = null;
+      _question = null;
+      _retrySignature = null;
+      _retryClientId = null;
+    }
+    _threadId = state.threadId;
+    _pendingChoices
+      ..clear()
+      ..addAll(state.pendingAnswerChoiceMessageIds);
+    _verificationRequests = state.verificationRequests;
     final changed = _hiddenMessageCount != state.hiddenMessageCount;
     _hiddenMessageCount = state.hiddenMessageCount;
     _hiddenMessageIds.addAll(state.hiddenMessageIds);
@@ -319,6 +421,11 @@ final class ChatController extends ChangeNotifier {
     );
     _mergeMessages(state.messages);
     _turn = state.turn;
+    if (_replyTarget != null &&
+        !_messages.any((message) => message.id == _replyTarget!.id)) {
+      _replyTarget = null;
+    }
+    if (state.turn != NodTurnState.waiting) _question = null;
     if (changed) {
       final version = ++_historyVersion;
       if (capped && _historyOldest != null) {

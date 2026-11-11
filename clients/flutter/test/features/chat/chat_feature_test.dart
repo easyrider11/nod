@@ -883,6 +883,55 @@ void main() {
     },
   );
 
+  testWidgets(
+    'server pending choices stay with their message and clear when stale or reset',
+    (tester) async {
+      final message = NodMessage(
+        id: 'question-message',
+        role: NodMessageRole.assistant,
+        text: 'Which report?',
+        createdAt: DateTime(2026),
+        answerChoices: const NodAnswerChoices(
+          multiple: false,
+          options: [
+            NodAnswerChoice(
+              id: 'choice-1',
+              label: 'Draft',
+              description: 'Keep it private',
+            ),
+          ],
+        ),
+      );
+      NodState state(String threadId, List<String> pending) => NodState(
+        threadId: threadId,
+        messages: [message],
+        turn: NodTurnState.waiting,
+        revision: threadId,
+        pendingAnswerChoiceMessageIds: pending,
+      );
+      final repository = FakeNodRepository(
+        state: state('original-thread', ['question-message']),
+      );
+      addTearDown(repository.dispose);
+      await _pumpChat(tester, repository);
+      repository.emitConnection(
+        const NodConnectionState(phase: NodConnectionPhase.connected),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('answer-choice-1')), findsOneWidget);
+      await tester.tap(find.text('Write an answer'));
+      await tester.pump();
+      expect(find.byTooltip('Cancel reply'), findsOneWidget);
+      repository.emitEvent(NodRefreshEvent(state('original-thread', [])));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('answer-choice-1')), findsNothing);
+      repository.emitEvent(NodRefreshEvent(state('new-thread', [])));
+      await tester.pump();
+      expect(find.byTooltip('Cancel reply'), findsNothing);
+      expect(find.text('Which report?'), findsOneWidget);
+    },
+  );
+
   testWidgets('renders approval questions without private entry', (
     tester,
   ) async {

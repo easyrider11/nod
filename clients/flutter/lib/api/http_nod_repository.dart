@@ -11,6 +11,7 @@ import '../core/app_connections.dart';
 import '../core/attachments.dart';
 import '../core/audio.dart';
 import '../core/core.dart';
+import '../core/private_requests.dart';
 import '../core/schedules.dart';
 import '../core/usage.dart';
 import 'sse.dart';
@@ -21,6 +22,8 @@ typedef NodHttpClientFactory = http.Client Function();
 final class HttpNodRepository
     implements
         NodRepository,
+        NodReplyRepository,
+        NodPrivateBrowserTransport,
         NodApiTransport,
         NodAppsRepository,
         NodAttachmentsRepository,
@@ -31,6 +34,7 @@ final class HttpNodRepository
     NodCredentialStorage? credentials,
     http.Client? client,
     NodHttpClientFactory? eventClientFactory,
+    NodHttpClientFactory? browserClientFactory,
     NodDelay? delay,
     this.requestTimeout = const Duration(seconds: 15),
     List<Duration>? reconnectDelays,
@@ -38,6 +42,7 @@ final class HttpNodRepository
        _apiClient = client ?? http.Client(),
        _closeApiClient = client == null,
        _eventClientFactory = eventClientFactory ?? http.Client.new,
+       _browserClientFactory = browserClientFactory ?? http.Client.new,
        _delay = delay ?? Future<void>.delayed,
        _reconnectDelays =
            reconnectDelays ??
@@ -54,6 +59,8 @@ final class HttpNodRepository
   final http.Client _apiClient;
   final bool _closeApiClient;
   final NodHttpClientFactory _eventClientFactory;
+  final NodHttpClientFactory _browserClientFactory;
+  final Set<void Function()> _closeBrowserStreams = {};
   final NodDelay _delay;
   final Duration requestTimeout;
   final List<Duration> _reconnectDelays;
@@ -108,6 +115,7 @@ final class HttpNodRepository
     if (config.token.isEmpty) throw const NodUnauthorizedException();
     final accepted = NodConnectionConfig(origin: origin, token: config.token);
     final generation = ++_generation;
+    _closeBrowsers();
     await _closeEvents();
     _config = accepted;
     _retryIndex = 0;
@@ -179,6 +187,7 @@ final class HttpNodRepository
   Future<void> disconnect() async {
     if (_disposed) return;
     ++_generation;
+    _closeBrowsers();
     _reconnectTask = null;
     await _closeEvents();
     _clearConnection();
@@ -244,6 +253,33 @@ final class HttpNodRepository
         if (_threadId != null) 'threadId': _threadId,
       },
     );
+  }
+
+  @override
+  Future<void> sendReply(
+    String text, {
+    required String clientMessageId,
+    required String threadId,
+    required String replyToMessageId,
+    List<String>? choiceIds,
+    bool customAnswer = false,
+  }) async {
+    if (text.trim().isEmpty || (choiceIds != null && customAnswer)) {
+      throw const NodRequestException();
+    }
+    await _requestJson(
+      'POST',
+      '/api/messages',
+      body: {
+        'text': text.trim(),
+        'clientMessageId': clientMessageId,
+        'threadId': threadId,
+        'replyToMessageId': replyToMessageId,
+        if (choiceIds != null) 'questionAnswer': {'choiceIds': choiceIds},
+        if (customAnswer) 'questionAnswer': {'custom': true},
+      },
+    );
+    await _reconcile(emit: true);
   }
 
   @override
@@ -468,7 +504,10 @@ final class HttpNodRepository
   }
 
   @override
-  Future<void> stop() => _requestJson('POST', '/api/thread/stop').then((_) {});
+  Future<void> stop() async {
+    await _requestJson('POST', '/api/thread/stop');
+    _closeBrowsers();
+  }
 
   T _usageValue<T>(Object? value, T Function(Map<String, Object?>) parse) {
     try {
@@ -653,10 +692,137 @@ final class HttpNodRepository
     );
   }
 
+  void _closeBrowsers() {
+    for (final close in _closeBrowserStreams.toList()) {
+      close();
+    }
+  }
+
+  @override
+  Stream<List<int>> browserHandoffFrames(String turnId) {
+    _ensureConnected();
+    if (!RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    ).hasMatch(turnId)) {
+      throw const NodRequestException();
+    }
+    final generation = _generation;
+    final client = _browserClientFactory();
+    StreamSubscription<List<int>>? subscription;
+    Timer? timer;
+    var closed = false;
+    final buffer = <int>[];
+    int? length;
+    late final StreamController<List<int>> controller;
+    late final void Function() close;
+    close = () {
+      if (closed) return;
+      closed = true;
+      timer?.cancel();
+      client.close();
+      unawaited(subscription?.cancel());
+      _closeBrowserStreams.remove(close);
+      unawaited(controller.close());
+    };
+    void fail(Object error) {
+      if (!closed) controller.addError(error);
+      close();
+    }
+
+    void deadline() {
+      timer?.cancel();
+      timer = Timer(
+        const Duration(seconds: 30),
+        () => fail(const NodTimeoutException()),
+      );
+    }
+
+    Future<void> start() async {
+      if (!_isCurrent(generation)) {
+        close();
+        return;
+      }
+      _closeBrowserStreams.add(close);
+      final request = http.Request(
+        'GET',
+        _uri('/api/browser-handoff/stream?turnId=$turnId'),
+      )..followRedirects = false;
+      request.headers.addAll(_headers());
+      try {
+        final response = await client.send(request).timeout(requestTimeout);
+        if (closed || !_isCurrent(generation)) {
+          close();
+          return;
+        }
+        if (response.statusCode != 200) {
+          fail(_statusError(response.statusCode, ''));
+          return;
+        }
+        deadline();
+        subscription = response.stream.listen(
+          (bytes) {
+            if (closed || !_isCurrent(generation)) {
+              close();
+              return;
+            }
+            var offset = 0;
+            while (!closed && offset < bytes.length) {
+              final needed = (length ?? 4) - buffer.length;
+              final remaining = bytes.length - offset;
+              final count = needed < remaining ? needed : remaining;
+              buffer.addAll(bytes.getRange(offset, offset + count));
+              offset += count;
+              if (length == null) {
+                if (buffer.length < 4) continue;
+                length =
+                    (buffer[0] << 24) |
+                    (buffer[1] << 16) |
+                    (buffer[2] << 8) |
+                    buffer[3];
+                buffer.clear();
+                if (length! <= 0 || length! > 8 * 1024 * 1024) {
+                  fail(const NodProtocolException());
+                  return;
+                }
+              } else if (buffer.length == length) {
+                controller.add(List<int>.unmodifiable(buffer));
+                buffer.clear();
+                length = null;
+                deadline();
+              }
+            }
+          },
+          onError: (Object error) => fail(_transportError(error)),
+          onDone: () {
+            if (length != null || buffer.isNotEmpty) {
+              fail(const NodProtocolException());
+            } else {
+              close();
+            }
+          },
+        );
+      } on Object catch (error) {
+        if (!closed) fail(_transportError(error));
+      }
+    }
+
+    controller = StreamController<List<int>>(
+      onListen: () => unawaited(start()),
+      onPause: () => subscription?.pause(),
+      onResume: () {
+        deadline();
+        subscription?.resume();
+      },
+      onCancel: close,
+    );
+    return controller.stream;
+  }
+
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
     ++_generation;
+    _closeBrowsers();
     await _closeEvents();
     if (_closeApiClient) _apiClient.close();
     await _connectionController.close();
@@ -666,7 +832,8 @@ final class HttpNodRepository
   Future<void> _openEvents(int generation) async {
     if (!_isCurrent(generation)) return;
     final client = _eventClientFactory();
-    final request = http.Request('GET', _uri('/api/events'));
+    final request = http.Request('GET', _uri('/api/events'))
+      ..followRedirects = false;
     request.headers.addAll(_headers());
     http.StreamedResponse response;
     try {
@@ -882,7 +1049,7 @@ final class HttpNodRepository
     Map<String, Object?>? body,
   }) async {
     _ensureConnected();
-    final request = http.Request(method, _uri(path));
+    final request = http.Request(method, _uri(path))..followRedirects = false;
     request.headers.addAll(_headers(json: body != null));
     if (body != null) request.body = jsonEncode(body);
     try {
@@ -938,6 +1105,7 @@ final class HttpNodRepository
     final revision =
         _string(json['revision']) ??
         '$threadId:${messages.lastOrNull?.id ?? ''}:${turn.name}';
+    if (_threadId != null && _threadId != threadId) _closeBrowsers();
     _threadId = threadId;
     final hiddenIds = json['hiddenMessageIds'];
     final hiddenCount = json['hiddenMessageCount'];
@@ -949,6 +1117,24 @@ final class HttpNodRepository
     }
     return NodState(
       messages: messages,
+      threadId: threadId,
+      pendingAnswerChoiceMessageIds:
+          json['pendingAnswerChoiceMessageIds'] is List
+          ? List<String>.from(json['pendingAnswerChoiceMessageIds'] as List)
+          : messages
+                .where((message) => message.answerChoicesPending)
+                .map((message) => message.id)
+                .toList(),
+      verificationRequests: (json['verificationRequests'] as List? ?? const [])
+          .map((value) {
+            final request = _expectMap(value);
+            return NodVerificationRequest(
+              id: _requiredString(request['id']),
+              turnId: _requiredString(request['turnId']),
+              kind: _requiredString(request['kind']),
+            );
+          })
+          .toList(),
       turn: turn,
       revision: revision,
       hiddenMessageIds: hiddenIds == null
@@ -984,11 +1170,45 @@ final class HttpNodRepository
           _string(json['clientMessageId']) ??
           _string(json['client_message_id']),
       role: role,
+      turnId: _string(json['turnId']),
+      replyToMessageId: _string(json['replyToMessageId']),
+      reaction: _string(json['reaction']),
+      answerChoices:
+          role == NodMessageRole.assistant && json['answerChoices'] != null
+          ? _parseChoices(json['answerChoices'])
+          : null,
+      answerChoicesPending: json['answerChoicesPending'] == true,
       text: _string(json['audioCaption']) ?? _string(json['text']) ?? '',
       attachments: json['attachments'] is List
           ? (json['attachments'] as List).map(_parseArtifact).toList()
           : const [],
       createdAt: createdAt,
+    );
+  }
+
+  NodAnswerChoices _parseChoices(Object? value) {
+    final choices = _expectMap(value);
+    final options = choices['options'];
+    if (options is! List ||
+        options.isEmpty ||
+        options.length > 6 ||
+        choices['multiple'] is! bool) {
+      throw const NodProtocolException();
+    }
+    final parsed = options.map((value) {
+      final option = _expectMap(value);
+      return NodAnswerChoice(
+        id: _requiredString(option['id']),
+        label: _requiredString(option['label']),
+        description: _string(option['description']),
+      );
+    }).toList();
+    if (parsed.map((option) => option.id).toSet().length != parsed.length) {
+      throw const NodProtocolException();
+    }
+    return NodAnswerChoices(
+      options: parsed,
+      multiple: choices['multiple'] as bool,
     );
   }
 
