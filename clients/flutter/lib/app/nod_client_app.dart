@@ -14,6 +14,7 @@ import '../features/chat/chat.dart';
 import '../features/prepared/prepared_page.dart';
 import '../features/private_requests/private_requests_page.dart';
 import '../features/scheduled/scheduled_page.dart';
+import '../features/settings/settings_page.dart';
 import '../features/tasks/tasks_page.dart';
 import '../features/usage/usage_page.dart';
 import '../motion/motion.dart';
@@ -42,6 +43,8 @@ class _NodClientAppState extends State<NodClientApp> {
   var _connected = false;
   var _selectedIndex = 0;
   String? _focusMessageId;
+  ThemeMode? _accountTheme;
+  var _themeEpoch = 0;
   String? _connectionError;
 
   @override
@@ -63,6 +66,7 @@ class _NodClientAppState extends State<NodClientApp> {
         _connected = restored;
         _restoring = false;
       });
+      if (restored) unawaited(_loadTheme());
     } on NodException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -73,6 +77,7 @@ class _NodClientAppState extends State<NodClientApp> {
   }
 
   Future<void> _connect(NodConnectionConfig config) async {
+    ++_themeEpoch;
     setState(() => _connectionError = null);
     try {
       await _repository.connect(config);
@@ -81,6 +86,7 @@ class _NodClientAppState extends State<NodClientApp> {
         _connected = true;
         _selectedIndex = 0;
       });
+      unawaited(_loadTheme());
     } on NodException catch (error) {
       if (!mounted) return;
       setState(() => _connectionError = error.message);
@@ -88,7 +94,33 @@ class _NodClientAppState extends State<NodClientApp> {
     }
   }
 
+  Future<void> _loadTheme() async {
+    final epoch = ++_themeEpoch;
+    final repository = _repository;
+    if (repository is! NodApiTransport) return;
+    try {
+      final value = await (repository as NodApiTransport).requestJson(
+        'GET',
+        '/api/session',
+      );
+      final settings = value is Map ? value['settings'] : null;
+      if (!mounted || !_connected || epoch != _themeEpoch || settings is! Map) {
+        return;
+      }
+      setState(
+        () => _accountTheme = switch (settings['theme']) {
+          'light' => ThemeMode.light,
+          'dark' => ThemeMode.dark,
+          _ => ThemeMode.system,
+        },
+      );
+    } on Object {
+      return;
+    }
+  }
+
   Future<void> _logOut() async {
+    ++_themeEpoch;
     if (_repository case final HttpNodRepository repository) {
       await repository.forgetCredentials();
     }
@@ -97,6 +129,8 @@ class _NodClientAppState extends State<NodClientApp> {
     setState(() {
       _connected = false;
       _connectionError = null;
+      _focusMessageId = null;
+      _accountTheme = null;
     });
   }
 
@@ -117,7 +151,7 @@ class _NodClientAppState extends State<NodClientApp> {
       debugShowCheckedModeBanner: false,
       theme: NodTheme.light,
       darkTheme: NodTheme.dark,
-      themeMode: widget.themeMode,
+      themeMode: _accountTheme ?? widget.themeMode,
       home: NodMotionLifecycle(
         child: _restoring
             ? const _RestoringConnection()
@@ -126,6 +160,10 @@ class _NodClientAppState extends State<NodClientApp> {
                 repository: _repository,
                 selectedIndex: _selectedIndex,
                 focusMessageId: _focusMessageId,
+                onThemeChanged: (value) {
+                  ++_themeEpoch;
+                  setState(() => _accountTheme = value);
+                },
                 onShowMessage: (id) {
                   setState(() {
                     _focusMessageId = id;
@@ -365,8 +403,10 @@ class _ConnectedShell extends StatelessWidget {
     required this.onLogOut,
     required this.onShowMessage,
     this.focusMessageId,
+    required this.onThemeChanged,
   });
 
+  final ValueChanged<ThemeMode> onThemeChanged;
   final String? focusMessageId;
   final ValueChanged<String> onShowMessage;
   final NodRepository repository;
@@ -396,6 +436,11 @@ class _ConnectedShell extends StatelessWidget {
           label: 'Private entry',
           icon: Icons.lock_outline,
           selectedIcon: Icons.lock,
+        ),
+        const NodNavigationDestination(
+          label: 'Settings',
+          icon: Icons.settings_outlined,
+          selectedIcon: Icons.settings,
         ),
       ],
     ];
@@ -455,6 +500,11 @@ class _ConnectedShell extends StatelessWidget {
               ? NodPreparedPage(transport: transport)
               : selectedIndex == 6 && transport != null
               ? NodPrivateRequestsPage(transport: transport)
+              : selectedIndex == 7 && transport != null
+              ? NodSettingsPage(
+                  transport: transport,
+                  onThemeChanged: onThemeChanged,
+                )
               : _SectionPlaceholder(destination: destinations[selectedIndex]),
         ],
       ),

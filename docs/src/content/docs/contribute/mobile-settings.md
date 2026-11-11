@@ -17,7 +17,7 @@ Time zones use IANA names, such as `Europe/London`. Regions use locale tags, suc
 
 Task check-ins accept USD amounts of at least $1 with up to two decimal places. Leave the amount empty to turn them off. Each session counts model spending since your last message to it, including plan usage at its API-price estimate.
 
-The appearance preference is saved on the server. Applying it to the native app's shared theme remains the host shell's responsibility.
+The appearance preference is saved on the server and applied to the native app after a successful change. Reconnecting restores that preference.
 
 ## Connect and choose models
 

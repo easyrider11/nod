@@ -9,8 +9,13 @@ import 'model_settings_page.dart';
 import 'settings_widgets.dart';
 
 class NodSettingsPage extends StatelessWidget {
-  const NodSettingsPage({super.key, required this.transport});
+  const NodSettingsPage({
+    super.key,
+    required this.transport,
+    this.onThemeChanged,
+  });
   final NodApiTransport transport;
+  final ValueChanged<ThemeMode>? onThemeChanged;
   @override
   Widget build(BuildContext context) {
     final repository = NodSettingsRepository(transport);
@@ -23,7 +28,7 @@ class NodSettingsPage extends StatelessWidget {
           ListTile(
             title: const Text('General'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => open(_general(repository)),
+            onTap: () => open(_general(repository, onThemeChanged)),
           ),
           ListTile(
             title: const Text('Models'),
@@ -56,7 +61,10 @@ class NodSettingsPage extends StatelessWidget {
   }
 }
 
-Widget _general(NodSettingsRepository repository) => SettingsSection(
+Widget _general(
+  NodSettingsRepository repository,
+  ValueChanged<ThemeMode>? onThemeChanged,
+) => SettingsSection(
   title: 'General',
   load: () async => {
     'session': await repository.session(),
@@ -69,9 +77,7 @@ Widget _general(NodSettingsRepository repository) => SettingsSection(
       children: [
         ListTile(
           title: const Text('Appearance'),
-          subtitle: const Text(
-            'Saved on your Nod server. Client theme follows the mobile app shell.',
-          ),
+          subtitle: const Text('Shared with your paired Nod server.'),
           trailing: DropdownButton<String>(
             value: account['theme'] as String,
             items: ['system', 'light', 'dark']
@@ -79,8 +85,15 @@ Widget _general(NodSettingsRepository repository) => SettingsSection(
                   (value) => DropdownMenuItem(value: value, child: Text(value)),
                 )
                 .toList(),
-            onChanged: (value) =>
-                state.change(() => repository.saveAccount({'theme': value})),
+            onChanged: (value) => state.change(() async {
+              final result = await repository.saveAccount({'theme': value});
+              onThemeChanged?.call(switch (value) {
+                'light' => ThemeMode.light,
+                'dark' => ThemeMode.dark,
+                _ => ThemeMode.system,
+              });
+              return result;
+            }),
           ),
         ),
         for (final field in ['timeZone', 'locale'])
