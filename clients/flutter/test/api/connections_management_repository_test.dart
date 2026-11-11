@@ -6,15 +6,208 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:nod_client/api/api.dart';
 import 'package:nod_client/api/connections_management_repository.dart';
+import 'package:nod_client/core/api_transport.dart';
 import 'package:nod_client/core/connections_management.dart';
 import 'package:nod_client/core/core.dart';
+import 'package:nod_client/features/connections/channel_setup_page.dart';
 import 'package:nod_client/features/connections/connection_setup_page.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 void main() {
   const token = 'synthetic-secret-token';
   final config = NodConnectionConfig(
     origin: Uri.parse('https://nod.example.test'),
     token: token,
+  );
+
+  testWidgets(
+    'linked WhatsApp creates only the chosen policy-approved binding and cancels it on close',
+    (tester) async {
+      final fixture = LinkedWhatsAppFixture();
+      await openWhatsApp(tester, fixture);
+      expect(find.byType(QrImageView), findsNothing);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Show QR code'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.enterText(find.byType(TextField), '15555550123');
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
+      await tester.ensureVisible(find.text('Show QR code'));
+      await tester.tap(find.text('Show QR code'));
+      await tester.pumpAndSettle();
+      expect(fixture.creates.single, {
+        'mode': 'bot',
+        'allowedNumber': '15555550123',
+        'policyConfirmed': true,
+      });
+      expect(find.byType(QrImageView), findsOneWidget);
+      expect(
+        tester.widget<QrImageView>(find.byType(QrImageView)).semanticsLabel,
+        'Link WhatsApp to Nod',
+      );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(fixture.cancelled, [fixture.id]);
+      expect(fixture.enabled, isFalse);
+      expect(find.text('Open WhatsApp setup'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'linked WhatsApp self-chat never submits a personal-number binding',
+    (tester) async {
+      final fixture = LinkedWhatsAppFixture();
+      await openWhatsApp(tester, fixture);
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Use my own number').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
+      await tester.ensureVisible(find.text('Show QR code'));
+      await tester.tap(find.text('Show QR code'));
+      await tester.pumpAndSettle();
+      expect(fixture.creates.single, {
+        'mode': 'self-chat',
+        'policyConfirmed': true,
+      });
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(fixture.cancelled.length, 1);
+    },
+  );
+
+  testWidgets(
+    'linked QR expires locally, hides in background and refreshes to connected without unlinking',
+    (tester) async {
+      final fixture = LinkedWhatsAppFixture(enabled: true)
+        ..lifetime = const Duration(seconds: 1);
+      await openWhatsApp(tester, fixture);
+      expect(find.byType(QrImageView), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 1100));
+      expect(find.byType(QrImageView), findsNothing);
+      fixture.lifetime = const Duration(minutes: 1);
+      final pending = Completer<Object?>();
+      fixture.pendingRead = pending;
+      await tester.ensureVisible(find.text('Refresh WhatsApp status'));
+      await tester.tap(find.text('Refresh WhatsApp status'));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      pending.complete(fixture.status());
+      await tester.pump();
+      final reads = fixture.reads;
+      await tester.pump(const Duration(seconds: 5));
+      expect(fixture.reads, reads);
+      expect(find.byType(QrImageView), findsNothing);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.byType(QrImageView), findsOneWidget);
+      fixture.state = 'connected';
+      await tester.ensureVisible(find.text('Refresh WhatsApp status'));
+      await tester.tap(find.text('Refresh WhatsApp status'));
+      await tester.pumpAndSettle();
+      expect(find.byType(QrImageView), findsNothing);
+      await tester.ensureVisible(find.text('Done'));
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(fixture.enabled, isTrue);
+      expect(fixture.cancelled, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'renewal fences a stale in-flight read and cancellation uses only the renewed pairing',
+    (tester) async {
+      final fixture = LinkedWhatsAppFixture(enabled: true)..state = 'expired';
+      await openWhatsApp(tester, fixture);
+      final oldId = fixture.id;
+      final pending = Completer<Object?>();
+      fixture.pendingRead = pending;
+      await tester.ensureVisible(find.text('Refresh WhatsApp status'));
+      await tester.tap(find.text('Refresh WhatsApp status'));
+      await tester.pump();
+      await tester.ensureVisible(find.text('Start again'));
+      await tester.tap(find.text('Start again'));
+      await tester.pumpAndSettle();
+      expect(fixture.restarted, [oldId]);
+      expect(find.byType(QrImageView), findsOneWidget);
+      pending.complete({'pairingId': oldId, 'state': 'expired'});
+      await tester.pumpAndSettle();
+      expect(find.byType(QrImageView), findsOneWidget);
+      await tester.ensureVisible(find.text('Cancel setup'));
+      await tester.tap(find.text('Cancel setup'));
+      await tester.pumpAndSettle();
+      expect(fixture.cancelled, [fixture.id]);
+      expect(fixture.id == oldId, isFalse);
+    },
+  );
+
+  testWidgets(
+    'read and cancellation failure hide QR and keep unfinished setup open for an exact retry',
+    (tester) async {
+      final fixture = LinkedWhatsAppFixture(enabled: true);
+      await openWhatsApp(tester, fixture);
+      fixture.failRead = true;
+      await tester.ensureVisible(find.text('Refresh WhatsApp status'));
+      await tester.tap(find.text('Refresh WhatsApp status'));
+      await tester.pumpAndSettle();
+      expect(find.byType(QrImageView), findsNothing);
+      fixture.failCancel = true;
+      await tester.ensureVisible(find.text('Cancel setup'));
+      await tester.tap(find.text('Cancel setup'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open WhatsApp setup'), findsNothing);
+      expect(fixture.enabled, isTrue);
+      fixture.failCancel = false;
+      await tester.tap(find.text('Cancel setup'));
+      await tester.pumpAndSettle();
+      expect(fixture.cancelled, [fixture.id]);
+      expect(fixture.enabled, isFalse);
+    },
+  );
+
+  testWidgets(
+    'managed linked setup permits renewal but never disconnects or cancels on close',
+    (tester) async {
+      final fixture = LinkedWhatsAppFixture(enabled: true, managed: true)
+        ..state = 'logged_out';
+      await openWhatsApp(tester, fixture);
+      expect(find.text('Disconnect'), findsNothing);
+      await tester.ensureVisible(find.text('Start again'));
+      await tester.tap(find.text('Start again'));
+      await tester.pumpAndSettle();
+      expect(fixture.restarted.length, 1);
+      expect(find.byType(QrImageView), findsOneWidget);
+      await tester.ensureVisible(find.text('Cancel setup'));
+      await tester.tap(find.text('Cancel setup'));
+      await tester.pumpAndSettle();
+      expect(fixture.cancelled, isEmpty);
+      expect(fixture.enabled, isTrue);
+    },
+  );
+
+  testWidgets(
+    'disconnect removes a connected linked device only after owner confirmation',
+    (tester) async {
+      final fixture = LinkedWhatsAppFixture(enabled: true)..state = 'connected';
+      await openWhatsApp(tester, fixture);
+      await tester.ensureVisible(find.text('Disconnect'));
+      await tester.tap(find.text('Disconnect'));
+      await tester.pumpAndSettle();
+      expect(fixture.removals, 0);
+      await tester.tap(find.widgetWithText(FilledButton, 'Disconnect'));
+      await tester.pumpAndSettle();
+      expect(fixture.removals, 1);
+      expect(fixture.enabled, isFalse);
+      expect(find.byType(QrImageView), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      expect(fixture.cancelled, isEmpty);
+    },
   );
 
   for (final outcome in ['connected', 'expired', 'cancelled']) {
@@ -503,5 +696,141 @@ final class MemoryCredentials implements NodCredentialStorage {
   @override
   Future<void> write(NodConnectionConfig config) async {
     value = config;
+  }
+}
+
+Future<void> openWhatsApp(
+  WidgetTester tester,
+  LinkedWhatsAppFixture fixture,
+) async {
+  tester.view.physicalSize = const Size(390, 844);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => NodChannelSetupPage(
+                  repository: NodConnectionsManagementRepository(fixture),
+                  provider: 'whatsapp',
+                ),
+              ),
+            ),
+            child: const Text('Open WhatsApp setup'),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.tap(find.text('Open WhatsApp setup'));
+  await tester.pumpAndSettle();
+}
+
+class LinkedWhatsAppFixture implements NodApiTransport {
+  LinkedWhatsAppFixture({this.enabled = false, this.managed = false});
+  bool enabled;
+  final bool managed;
+  String state = 'awaiting_scan';
+  String mode = 'bot';
+  int revision = 1;
+  int reads = 0;
+  int removals = 0;
+  bool failRead = false;
+  bool failCancel = false;
+  Duration lifetime = const Duration(minutes: 1);
+  Completer<Object?>? pendingRead;
+  final creates = <Map<String, Object?>>[];
+  final restarted = <String>[];
+  final cancelled = <String>[];
+  String get id =>
+      '00000000-0000-4000-8000-${revision.toString().padLeft(12, '0')}';
+
+  Map<String, Object?> status() => {
+    'pairingId': id,
+    'state': state,
+    if (state == 'awaiting_scan') ...{
+      'qr': 'fixture-private-pairing-$revision',
+      'expiresAt': DateTime.now().add(lifetime).toUtc().toIso8601String(),
+    },
+    if (state == 'connected') 'accountName': 'Fixture owner',
+  };
+
+  @override
+  Future<Object?> requestJson(
+    String method,
+    String path, {
+    Map<String, Object?>? body,
+  }) async {
+    if (path == '/api/channel-settings' && method == 'GET') {
+      return {
+        'channels': [
+          {
+            'provider': 'whatsapp',
+            'enabled': enabled,
+            'managed': managed,
+            'mode': 'linked',
+            'linkMode': mode,
+            'connectionState': state,
+          },
+        ],
+      };
+    }
+    if (path == '/api/channel-settings/whatsapp' && method == 'PUT') {
+      if (managed ||
+          body?['policyConfirmed'] != true ||
+          !{'bot', 'self-chat'}.contains(body?['mode'])) {
+        throw StateError('Setup refused');
+      }
+      if (body!['mode'] == 'bot' &&
+          !RegExp(r'^\d{7,15}$')
+              .hasMatch(body['allowedNumber'] as String? ?? '')) {
+        throw StateError('Binding refused');
+      }
+      if (body['mode'] == 'self-chat' && body.containsKey('allowedNumber')) {
+        throw StateError('Unexpected binding');
+      }
+      creates.add(body);
+      mode = body['mode'] as String;
+      enabled = true;
+      return {'ok': true};
+    }
+    if (path == '/api/channel-settings/whatsapp' && method == 'DELETE') {
+      if (managed) throw StateError('Managed channel');
+      removals++;
+      enabled = false;
+      return {'ok': true};
+    }
+    if (path != '/api/channel-settings/whatsapp/pairing' || !enabled) {
+      throw StateError('Pairing unavailable');
+    }
+    if (method == 'GET') {
+      reads++;
+      if (failRead) throw StateError('Synthetic read failure');
+      final pending = pendingRead;
+      pendingRead = null;
+      return pending == null ? status() : await pending.future;
+    }
+    if (body?.length != 1 || body?['pairingId'] != id) {
+      throw StateError('Pairing changed');
+    }
+    if (method == 'POST') {
+      restarted.add(id);
+      revision++;
+      state = 'awaiting_scan';
+      return status();
+    }
+    if (method == 'DELETE') {
+      if (managed || failCancel) throw StateError('Cancellation refused');
+      if (state != 'connected') {
+        cancelled.add(id);
+        enabled = false;
+      }
+      return {'ok': true};
+    }
+    throw StateError('Unsupported fixture request');
   }
 }

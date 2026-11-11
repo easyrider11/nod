@@ -3,7 +3,7 @@ title: Manage mobile connections
 description: Manage connected accounts and private app and channel configuration in the Flutter evaluation client.
 ---
 
-The native connections panel manages saved app accounts, MCP setup, n8n setup, Telegram, and WhatsApp Cloud API configuration through your paired Nod server.
+The native connections panel manages saved app accounts, MCP setup, n8n setup, Telegram, and linked-device or Cloud API WhatsApp configuration through your paired Nod server.
 
 This is part of the [Flutter evaluation client](/contribute/mobile-evaluation/), not a supported mobile release. The server still decides account ownership, connection availability, and permissions.
 
@@ -48,16 +48,32 @@ External sign-in addresses must use HTTPS, without embedded credentials or token
 
 Use **Start pairing again** when the pairing expires. **Use this user ID** is the alternative to the pairing link. No account is confirmed from a locally selected label alone. A bot using a webhook needs the matching server setup; polling is the default.
 
+## Link WhatsApp with a QR code
+
+1. Open **WhatsApp** and choose **Separate bot number** or **Use my own number**.
+2. For a bot number, register a second WhatsApp account. Enter your personal number with the country code, using digits only.
+3. Read the account restriction warning and **Read WhatsApp terms**, then select the policy checkbox.
+4. Select **Show QR code**. In WhatsApp, open **Settings → Linked Devices → Link a Device** and scan the code from another screen.
+5. Wait for the server to confirm the connection. For your own number, use **Message yourself**. For a bot, message its linked number from your personal account.
+
+The QR code is rendered locally, without a third-party image service. Its payload stays in the private panel, not chat, logs, launch URLs, or shared files. Codes hide when they expire, when a status check fails, while the app is backgrounded, and after scanning. Returning to Nod refreshes the server status before showing another code.
+
+The setup lasts five minutes. Select **Start again** after expiry, a failure, or a sign-out. Renewal uses the current pairing ID; an old status response cannot restore its code. Closing an unfinished setup cancels that exact pairing. If cancellation fails, the panel stays open for a retry. Closing a connected panel keeps the account connected.
+
+Select **Disconnect**, then confirm, to remove the linked device. You can also remove Nod in WhatsApp's **Linked Devices** settings. A server-managed link allows scanning and renewal, but not editing or removal here.
+
 ## Set up WhatsApp Cloud API
 
-Open **WhatsApp** and enter the business phone number ID, your personal number, access token, Meta app secret, and webhook verification token. Read and accept the policy statement, then select **Save Cloud API setup**. Configure the matching callback and verification token in Meta and subscribe to messages.
+Select **Use Meta Cloud API instead** before starting QR setup. Enter the business phone number ID, your personal number, access token, Meta app secret, and webhook verification token. Read and accept the policy statement, then select **Save Cloud API setup**. Configure the matching callback and verification token in Meta and subscribe to messages.
 
 Cloud API mode needs a public HTTPS callback. It replies only within 24 hours of your last message and is not the linked-device QR connection.
+
+Select **Use linked-device QR instead** to return to linked-device setup. Changing modes is a new explicit setup, not an automatic fallback.
 
 Server-managed channels show their status but cannot be edited or disconnected here. Change their environment configuration on the server.
 
 :::caution[Remaining evaluation limits]
-Linked-device WhatsApp QR creation, renewal, and scanning are not implemented in this native panel. Browser sign-in on a phone and real app or channel connections still need separate runtime validation.
+QR rendering and lifecycle checks use synthetic data. Scanning on physical devices, browser sign-in on a phone, and real app or channel delivery still need separate runtime validation.
 :::
 
 ## Check the native contracts
@@ -69,7 +85,7 @@ flutter test test/api/connections_management_repository_test.dart
 flutter analyze lib/core/connections_management.dart lib/api/connections_management_repository.dart lib/features/connections test/api/connections_management_repository_test.dart
 ```
 
-These synthetic checks cover paired bearer requests, exact-account removal and reconnect, private configuration bodies, hashed cancellation, and foreground completion, expiry, and cancellation. They do not call a connected account, run the full server, or prove native browser callbacks or real channel delivery.
+These synthetic checks cover paired bearer requests, exact-account removal and reconnect, private configuration bodies, hashed cancellation, and foreground completion, expiry, and cancellation. Linked WhatsApp checks cover policy consent, both modes, QR expiry and hiding, exact-pairing renewal and cancellation, stale responses, managed channels, and confirmed disconnect. They do not call a connected account, run the full server, or prove native browser callbacks or real channel delivery.
 
 ## Related resources
 

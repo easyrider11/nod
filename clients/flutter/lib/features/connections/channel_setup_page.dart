@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../api/connections_management_repository.dart';
 import '../../core/connections_management.dart';
+import 'linked_whatsapp_setup.dart';
 
 class NodChannelSetupPage extends StatefulWidget {
   const NodChannelSetupPage({
@@ -31,6 +32,9 @@ class _NodChannelSetupPageState extends State<NodChannelSetupPage>
   bool _active = true;
   bool _policy = false;
   bool _editing = false;
+  bool _loaded = false;
+  bool _cloud = false;
+  bool _linkedRequested = false;
   Timer? _timer;
   bool get _telegram => widget.provider == 'telegram';
   TextEditingController _controller(String name) =>
@@ -64,6 +68,7 @@ class _NodChannelSetupPageState extends State<NodChannelSetupPage>
           _setup = channels
               .where((c) => c.provider == widget.provider)
               .firstOrNull;
+          _loaded = true;
         });
       }
     } catch (_) {
@@ -241,6 +246,49 @@ class _NodChannelSetupPageState extends State<NodChannelSetupPage>
     );
     final pairingActive = expires != null && expires.isAfter(DateTime.now());
     final managed = setup?.managed == true;
+    if (!_telegram && !_loaded) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('WhatsApp')),
+        body: Center(
+          child: _error == null
+              ? const CircularProgressIndicator()
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_error!),
+                    TextButton(
+                      onPressed: _load,
+                      child: const Text('Refresh status'),
+                    ),
+                  ],
+                ),
+        ),
+      );
+    }
+    if (!_telegram &&
+        !_cloud &&
+        (_linkedRequested ||
+            setup?.enabled != true ||
+            setup?.mode == 'linked')) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('WhatsApp')),
+        body: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            NodLinkedWhatsAppSetup(
+              repository: widget.repository,
+              setup: setup,
+              onChanged: _load,
+              onCloud: () => setState(() {
+                _cloud = true;
+                _editing = true;
+                _linkedRequested = false;
+              }),
+            ),
+          ],
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: Text(_telegram ? 'Telegram' : 'WhatsApp')),
       body: ListView(
@@ -337,10 +385,6 @@ class _NodChannelSetupPageState extends State<NodChannelSetupPage>
                 child: const Text('Use this user ID'),
               ),
             ],
-            if (!_telegram && setup?.mode == 'linked')
-              const Text(
-                'Linked-device QR setup is not available in this native panel. Manage the linked device in the authenticated Nod web app. Cloud API is a separate setup, not a QR replacement.',
-              ),
             TextButton(
               onPressed: _busy
                   ? null
@@ -352,6 +396,17 @@ class _NodChannelSetupPageState extends State<NodChannelSetupPage>
               child: const Text('Disconnect'),
             ),
           ],
+          if (!_telegram && !managed)
+            TextButton(
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                      _cloud = false;
+                      _linkedRequested = true;
+                      _editing = false;
+                    }),
+              child: const Text('Use linked-device QR instead'),
+            ),
           TextButton(
             onPressed: _busy ? null : _load,
             child: const Text('Refresh status'),
