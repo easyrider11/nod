@@ -4,19 +4,22 @@ import 'package:flutter_test/flutter_test.dart';
 Future<void> navigateToSection(WidgetTester tester, String destination) async {
   final desktop = find.byKey(Key('desktop-navigation-$destination'));
   if (desktop.evaluate().isNotEmpty) {
-    await _tapReady(tester, desktop);
+    await tapReadyControl(tester, desktop);
     await _readyControl(tester, desktop);
     return;
   }
   final back = find.byKey(const Key('back-to-chat'));
   final menu = find.byKey(const Key('open-navigation'));
   if (back.evaluate().isNotEmpty) {
-    await _tapReady(tester, back, drawerClosed: true);
+    await tapReadyControl(tester, back, drawerClosed: true);
     await _readyControl(tester, menu, drawerClosed: true);
     if (destination == 'chat') return;
   }
-  await _tapReady(tester, menu, drawerClosed: true);
-  await _tapReady(tester, find.byKey(Key('mobile-navigation-$destination')));
+  await tapReadyControl(tester, menu, drawerClosed: true);
+  await tapReadyControl(
+    tester,
+    find.byKey(Key('mobile-navigation-$destination')),
+  );
   await _readyControl(
     tester,
     destination == 'chat' ? menu : back,
@@ -24,7 +27,7 @@ Future<void> navigateToSection(WidgetTester tester, String destination) async {
   );
 }
 
-Future<void> _tapReady(
+Future<void> tapReadyControl(
   WidgetTester tester,
   Finder control, {
   bool drawerClosed = false,

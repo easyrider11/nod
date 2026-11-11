@@ -81,16 +81,41 @@ Future<void> runParityWorkflows(
     await parityTap(tester, find.text('Show in chat'));
     await parityReady(
       tester,
-      find.text('Synthetic older task question: continue the draft?').first,
+      find.byKey(const ValueKey('chat-focus-$_taskQuestion')),
     );
+    await parityReady(tester, find.byTooltip('Cancel reply'));
     expect((await inspect())['aroundReads'], greaterThanOrEqualTo(1));
-    await tester.enterText(
-      find.byKey(const Key('chat-composer')),
+    await parityWait(tester, () async {
+      final composer = find.byKey(const Key('chat-composer'));
+      final route = ModalRoute.of(tester.element(composer));
+      return tester.widget<TextField>(composer).enabled == true &&
+          route?.isCurrent == true &&
+          route?.secondaryAnimation?.status == AnimationStatus.dismissed;
+    });
+    final composer = find.byKey(const Key('chat-composer'));
+    await tester.tap(composer.hitTestable());
+    await parityWait(tester, () async {
+      final editable = tester.widget<EditableText>(
+        find.descendant(of: composer, matching: find.byType(EditableText)),
+      );
+      return editable.focusNode.hasFocus;
+    });
+    await tester.enterText(composer, 'Continue synthetic task');
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('chat-composer')))
+          .controller!
+          .text,
       'Continue synthetic task',
     );
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump(const Duration(milliseconds: 300));
-    await parityTap(tester, find.byKey(const Key('chat-send')));
+    await tapReadyControl(tester, find.byKey(const Key('chat-send')));
+    await parityWait(
+      tester,
+      () async => (await inspect())['taskDispatches'] == 1,
+    );
     expect(
       (await inspect())['taskDispatches'],
       1,

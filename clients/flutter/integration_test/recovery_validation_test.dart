@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nod_client/api/api.dart';
 import 'package:nod_client/app/nod_client_app.dart';
 import 'package:nod_client/core/core.dart';
+import 'package:nod_client/core/mobile_links.dart';
 
 import '../tool/validation_harness.dart';
 import 'support/parity_fixture.dart';
@@ -43,6 +44,7 @@ void main() {
           NodClientApp(
             repository: repository,
             restoreConnection: () async => true,
+            linkSource: const _HostLinks(),
             disposeRepository: false,
           ),
         );
@@ -128,6 +130,7 @@ void main() {
           NodClientApp(
             repository: repository,
             restoreConnection: () async => false,
+            linkSource: const _HostLinks(),
             disposeRepository: false,
             themeMode: ThemeMode.light,
           ),
@@ -213,6 +216,14 @@ Future<void> _pumpUntil(
     await tester.pump(const Duration(milliseconds: 20));
   }
   expect(finder, findsOneWidget);
+}
+
+final class _HostLinks implements NodMobileLinkSource {
+  const _HostLinks();
+  @override
+  Future<Uri?> initialUri() async => null;
+  @override
+  Stream<Uri> get uris => const Stream.empty();
 }
 
 final class _MemoryCredentials implements NodCredentialStorage {

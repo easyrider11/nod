@@ -68,6 +68,10 @@ The tokens above are fixed public test values, not credentials. Never substitute
 
 Stop Terminal A with Ctrl-C after the run. Start it again with a fresh directory before every rerun. If you change the port, change both terminals. Never reuse a Dart build directory from another checkout.
 
+Host checks supply an empty incoming-link source because `flutter-tester` has no platform plugins. The native scenario uses the registered platform link plugin. Neither scenario simulates OS-delivered URL events.
+
+When editing a composer again after unfocusing it, the shared workflow driver taps the field and waits for actual focus before entering text. The pinned Flutter native integration binding can retain its previous editable-state reference after the platform text connection closes. Calling `enterText` alone again can silently send to no current client. The driver then waits for an enabled, stable send control, taps once, and waits for the server dispatch count. It never retries a send to make a test pass.
+
 ## What the scenario checks
 
 The native scenario first connects through the connection form, sends once, streams, stops, and recovers history after an interrupted SSE connection. It opens Scheduled and Usage before running the shared workflow driver.
