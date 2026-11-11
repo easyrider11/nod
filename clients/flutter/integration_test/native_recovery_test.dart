@@ -9,12 +9,13 @@ import 'package:nod_client/app/nod_client_app.dart';
 import 'package:nod_client/core/core.dart';
 
 import 'support/navigation.dart';
+import 'support/parity_workflows.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'native app connects, streams, stops, recovers and opens schedules and usage',
+    'native app recovers and continues isolated integrated workflows',
     (tester) async {
       const syntheticOnly = bool.fromEnvironment('NOD_SYNTHETIC_ONLY');
       const url = String.fromEnvironment('NOD_SYNTHETIC_URL');
@@ -172,6 +173,7 @@ void main() {
         await _pumpUntil(tester, find.text('Synthetic native recovery reply'));
         expect(find.byKey(const Key('chat-composer')), findsOneWidget);
         expect(tester.takeException(), isNull);
+        await runParityWorkflows(tester, repository, origin, controlToken);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
@@ -179,7 +181,7 @@ void main() {
         control.close();
       }
     },
-    timeout: const Timeout(Duration(minutes: 2)),
+    timeout: const Timeout(Duration(minutes: 4)),
   );
 }
 

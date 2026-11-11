@@ -9,8 +9,60 @@ import 'package:nod_client/app/nod_client_app.dart';
 import 'package:nod_client/core/core.dart';
 
 import '../tool/validation_harness.dart';
+import 'support/parity_fixture.dart';
+import 'support/parity_workflows.dart';
 
 void main() {
+  testWidgets(
+    'integrated workflows use isolated HTTP state and exact replies',
+    (tester) async {
+      const recorderChannel = MethodChannel('com.llfbandit.record/messages');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(recorderChannel, (call) async {
+        if (call.method != 'create' && call.method != 'dispose') {
+          throw StateError('Unexpected recorder operation.');
+        }
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(recorderChannel, null),
+      );
+      await tester.binding.setSurfaceSize(const Size(430, 932));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final fixture = await ParityFixture.start();
+      final repository = HttpNodRepository(credentials: _MemoryCredentials());
+      try {
+        await repository.connect(
+          NodConnectionConfig(
+            origin: fixture.origin,
+            token: ParityFixture.token,
+          ),
+        );
+        await tester.pumpWidget(
+          NodClientApp(
+            repository: repository,
+            restoreConnection: () async => true,
+            disposeRepository: false,
+          ),
+        );
+        await parityReady(tester, find.text('Synthetic history ready'));
+        await runParityWorkflows(
+          tester,
+          repository,
+          fixture.origin,
+          ParityFixture.controlToken,
+        );
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        await repository.dispose();
+        await fixture.close();
+      }
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+
   test('validates recovery and multi-client coexistence contracts', () async {
     final outputDirectory = await Directory.systemTemp.createTemp(
       'nod-flutter-validation-test-',
@@ -63,6 +115,8 @@ void main() {
       addTearDown(
         () => messenger.setMockMethodCallHandler(recorderChannel, null),
       );
+      await tester.binding.setSurfaceSize(const Size(430, 932));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       final fixture = await DisposableValidationFixture.start();
       final credentials = _MemoryCredentials();
       final repository = HttpNodRepository(
