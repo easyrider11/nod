@@ -22,6 +22,24 @@ void main() {
     token: token,
   );
 
+  test('feature transport refuses off-origin and non-API destinations', () {
+    final repository = HttpNodRepository(credentials: MemoryCredentials());
+    addTearDown(repository.dispose);
+    for (final path in [
+      'https://outside.example/api/state',
+      '//outside.example/api/state',
+      '/api/../private',
+      '/api/%2e%2e/private',
+      '/private',
+      '/api/state#fragment',
+    ]) {
+      expect(
+        () => repository.requestJson('GET', path),
+        throwsA(isA<NodProtocolException>()),
+      );
+    }
+  });
+
   test(
     'schedule routes authenticate, fence revisions and preserve history cursor',
     () async {

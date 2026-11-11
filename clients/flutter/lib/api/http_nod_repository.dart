@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
+import '../core/api_transport.dart';
 import '../core/app_connections.dart';
 import '../core/attachments.dart';
 import '../core/audio.dart';
@@ -20,6 +21,7 @@ typedef NodHttpClientFactory = http.Client Function();
 final class HttpNodRepository
     implements
         NodRepository,
+        NodApiTransport,
         NodAppsRepository,
         NodAttachmentsRepository,
         NodAudioRepository,
@@ -854,6 +856,24 @@ final class HttpNodRepository
         if (identical(_reconnectTask, task)) _reconnectTask = null;
       }),
     );
+  }
+
+  @override
+  Future<Object?> requestJson(
+    String method,
+    String path, {
+    Map<String, Object?>? body,
+  }) {
+    final uri = Uri.tryParse(path);
+    if (uri == null ||
+        uri.hasScheme ||
+        uri.hasAuthority ||
+        uri.hasFragment ||
+        !uri.path.startsWith('/api/') ||
+        uri.pathSegments.any((segment) => segment == '..' || segment == '.')) {
+      throw const NodProtocolException();
+    }
+    return _requestJson(method, path, body: body);
   }
 
   Future<Object?> _requestJson(
