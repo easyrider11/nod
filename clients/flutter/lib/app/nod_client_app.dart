@@ -11,6 +11,7 @@ import '../core/usage.dart';
 import '../design_system/design_system.dart';
 import '../features/apps/apps_page.dart';
 import '../features/chat/chat.dart';
+import '../features/connections/connections_page.dart';
 import '../features/prepared/prepared_page.dart';
 import '../features/private_requests/private_requests_page.dart';
 import '../features/scheduled/scheduled_page.dart';
@@ -493,7 +494,27 @@ class _ConnectedShell extends StatelessWidget {
               : selectedIndex == 3 && repository is NodUsageRepository
               ? NodUsagePage(repository: repository as NodUsageRepository)
               : selectedIndex == 2 && repository is NodAppsRepository
-              ? NodAppsPage(repository: repository as NodAppsRepository)
+              ? Column(
+                  children: [
+                    if (transport != null)
+                      ListTile(
+                        leading: const Icon(Icons.manage_accounts_outlined),
+                        title: const Text('Manage accounts and channels'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                NodConnectionsPage(transport: transport),
+                          ),
+                        ),
+                      ),
+                    Expanded(
+                      child: NodAppsPage(
+                        repository: repository as NodAppsRepository,
+                      ),
+                    ),
+                  ],
+                )
               : selectedIndex == 4 && transport != null
               ? NodTasksPage(transport: transport, onShowMessage: showMessage)
               : selectedIndex == 5 && transport != null
