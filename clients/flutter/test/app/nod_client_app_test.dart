@@ -12,6 +12,7 @@ import 'package:nod_client/features/apps/apps_page.dart';
 import 'package:nod_client/features/chat/chat_testing.dart';
 import 'package:nod_client/features/onboarding/onboarding_page.dart';
 import 'package:nod_client/features/prepared/prepared_page.dart';
+import 'package:nod_client/features/private_requests/private_requests_page.dart';
 
 void main() {
   for (final failed in [false, true]) {
@@ -178,6 +179,23 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('chat-composer')),
+      'Synthetic unsent draft',
+    );
+    await tester.tap(find.byKey(const Key('open-private-requests')));
+    await tester.pumpAndSettle();
+    expect(find.byType(NodPrivateRequestsPage), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('chat-composer')))
+          .controller!
+          .text,
+      'Synthetic unsent draft',
+    );
+    expect(repository.chat.sentTexts, isEmpty);
     for (final section in ['tasks', 'prepared', 'private entry']) {
       await tester.tap(find.byTooltip('Open menu'));
       await tester.pumpAndSettle();

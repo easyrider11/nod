@@ -655,6 +655,7 @@ class _ConnectedShell extends StatelessWidget {
 
     void openPrivate() {
       if (transport == null) return;
+      FocusManager.instance.primaryFocus?.unfocus();
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => NodPrivateRequestsPage(transport: transport),
@@ -670,6 +671,15 @@ class _ConnectedShell extends StatelessWidget {
         onDestinationSelected(index);
       },
       onLogOut: onLogOut,
+      actions: [
+        if (selectedIndex == 0 && transport != null)
+          IconButton(
+            key: const Key('open-private-requests'),
+            tooltip: 'Private entry and browser',
+            onPressed: openPrivate,
+            icon: const Icon(Icons.info_outline_rounded),
+          ),
+      ],
       body: IndexedStack(
         index: selectedIndex == 0 ? 0 : 1,
         children: [
@@ -677,17 +687,6 @@ class _ConnectedShell extends StatelessWidget {
             repository: repository,
             active: selectedIndex == 0,
             focusMessageId: focusMessageId,
-            privateRequestBuilder: transport == null
-                ? null
-                : (context, requests) => TextButton.icon(
-                    onPressed: openPrivate,
-                    icon: const Icon(Icons.lock_outline),
-                    label: Text(
-                      requests.isEmpty
-                          ? 'Private entry and browser'
-                          : 'Complete private request',
-                    ),
-                  ),
           ),
           selectedIndex == 1 && repository is NodSchedulesRepository
               ? NodScheduledPage(

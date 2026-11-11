@@ -11,7 +11,7 @@ Opening a request from its original chat link keeps that exact request, even whe
 
 ## Complete a private sign-in
 
-1. Open **Private requests** from the conversation, or open a task's private action.
+1. Tap the info icon in the conversation's top bar (**Private entry and browser**), open **Private entry** from the menu, or open a task's private action.
 2. Select **Private sign-in** and check the complete website origin.
 3. Select an offered sign-in method or saved login. To enter another account, select **Use another login**.
 4. Enter the requested account, password, or verification code. Select **Save and continue** or **Continue**.

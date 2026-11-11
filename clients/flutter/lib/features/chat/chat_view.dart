@@ -42,7 +42,6 @@ class NodChat extends StatefulWidget {
     this.active = true,
     this.voiceDraft,
     this.pickAttachments,
-    this.privateRequestBuilder,
     this.focusMessageId,
     this.replyToFocusedMessage = true,
     super.key,
@@ -50,11 +49,6 @@ class NodChat extends StatefulWidget {
 
   final Future<List<NodUploadFile>> Function()? pickAttachments;
 
-  final Widget Function(
-    BuildContext context,
-    List<NodVerificationRequest> requests,
-  )?
-  privateRequestBuilder;
   final NodRepository repository;
   final bool autofocus;
   final bool active;
@@ -659,11 +653,6 @@ class _NodChatState extends State<NodChat>
                       title: Text(
                         'This message is no longer available. Choose a current task message to reply.',
                       ),
-                    ),
-                  if (widget.privateRequestBuilder != null)
-                    widget.privateRequestBuilder!(
-                      context,
-                      _controller.verificationRequests,
                     ),
                   if (_controller.replyTarget case final target?)
                     ListTile(
@@ -1719,13 +1708,29 @@ class _Composer extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        if (supportsAttachments && !recording)
-                          IconButton(
-                            key: const Key('chat-attach'),
-                            tooltip: 'Attach files',
-                            onPressed: voiceBusy ? null : onAttach,
-                            icon: const Icon(Icons.attach_file),
+                        FocusTraversalOrder(
+                          order: const NumericFocusOrder(21),
+                          child: IconButton.filled(
+                            key: Key(showStop ? 'chat-stop' : 'chat-send'),
+                            tooltip: showStop ? 'Stop Nod' : 'Send',
+                            onPressed: showStop
+                                ? (isStopping ? null : onStop)
+                                : (canSend ? onSend : null),
+                            icon: busy
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Icon(
+                                    showStop
+                                        ? Icons.stop_rounded
+                                        : Icons.arrow_upward_rounded,
+                                  ),
                           ),
+                        ),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: recording
                               ? InputDecorator(
@@ -1799,34 +1804,23 @@ class _Composer extends StatelessWidget {
                                             ? 'Reply or choose an option above'
                                             : 'Message Nod',
                                         border: const OutlineInputBorder(),
+                                        prefixIcon: supportsAttachments
+                                            ? IconButton(
+                                                key: const Key('chat-attach'),
+                                                tooltip: 'Attach files',
+                                                onPressed: voiceBusy
+                                                    ? null
+                                                    : onAttach,
+                                                icon: const Icon(
+                                                  Icons.attach_file,
+                                                ),
+                                              )
+                                            : null,
                                         suffixIcon: microphone,
                                       ),
                                     ),
                                   ),
                                 ),
-                        ),
-                        const SizedBox(width: 8),
-                        FocusTraversalOrder(
-                          order: const NumericFocusOrder(21),
-                          child: IconButton.filled(
-                            key: Key(showStop ? 'chat-stop' : 'chat-send'),
-                            tooltip: showStop ? 'Stop Nod' : 'Send',
-                            onPressed: showStop
-                                ? (isStopping ? null : onStop)
-                                : (canSend ? onSend : null),
-                            icon: busy
-                                ? const SizedBox.square(
-                                    dimension: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : Icon(
-                                    showStop
-                                        ? Icons.stop_rounded
-                                        : Icons.arrow_upward_rounded,
-                                  ),
-                          ),
                         ),
                       ],
                     ),
