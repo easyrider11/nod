@@ -1,0 +1,347 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:nod_client/api/http_nod_repository.dart';
+import 'package:nod_client/api/settings_repository.dart';
+import 'package:nod_client/core/core.dart';
+import 'package:nod_client/core/settings.dart';
+import 'package:nod_client/features/settings/settings_page.dart';
+import 'package:nod_client/features/settings/settings_widgets.dart';
+
+import 'http_nod_repository_test.dart' as fixture;
+
+void main() {
+  late HttpNodRepository transport;
+  late NodSettingsRepository repository;
+  final requests = <({String method, String path, Object? body})>[];
+  var status = 200;
+  Object? response = <String, Object?>{};
+  setUp(() async {
+    status = 200;
+    response = <String, Object?>{};
+    requests.clear();
+    final events = fixture.EventConnection();
+    transport = HttpNodRepository(
+      credentials: fixture.MemoryCredentials(),
+      eventClientFactory: () => events.client,
+      client: fixture.RoutingClient((request) async {
+        expect(request.url.origin, 'https://nod.example.test');
+        expect(
+          request.headers['Authorization'],
+          'Bearer synthetic-settings-token',
+        );
+        if (request.url.path == '/api/client/capabilities') {
+          return _json(200, {
+            'contractVersion': 1,
+            'authentication': {'mode': 'bearer'},
+          });
+        }
+        if (request.url.path == '/api/session') {
+          return _json(200, {
+            'user': {'id': 'synthetic-owner'},
+            'settings': {
+              'theme': 'system',
+              'usageData': false,
+              'traces': false,
+            },
+            'capabilities': {'traces': true},
+          });
+        }
+        if (request.url.path == '/api/state') {
+          return _json(200, {
+            'threadId': 'synthetic-thread',
+            'revision': '1',
+            'messages': <Object?>[],
+            'turns': <Object?>[],
+            'configuration': {'conversationResetEnabled': true},
+          });
+        }
+        final bytes = await request.finalize().toBytes();
+        requests.add((
+          method: request.method,
+          path: request.url.path,
+          body: bytes.isEmpty ? null : jsonDecode(utf8.decode(bytes)),
+        ));
+        return _json(status, response);
+      }),
+    );
+    await transport.connect(
+      NodConnectionConfig(
+        origin: Uri.parse('https://nod.example.test'),
+        token: 'synthetic-settings-token',
+      ),
+    );
+    repository = NodSettingsRepository(transport);
+  });
+  tearDown(() async => transport.dispose());
+
+  test(
+    'preferences, consent and task check-ins are narrow authenticated patches',
+    () async {
+      await repository.savePreferences({
+        'rules': 'Ask before deleting files.',
+        'timeZone': null,
+      });
+      await repository.saveAccount({'traces': false});
+      await repository.taskCheckIn(7.25);
+      await repository.taskCheckIn(null);
+      expect(requests, [
+        _request('PATCH', '/api/preferences', {
+          'rules': 'Ask before deleting files.',
+          'timeZone': null,
+        }),
+        _request('PATCH', '/api/account', {'traces': false}),
+        _request('PUT', '/api/trust/limit', {'taskUsd': 7.25}),
+        _request('PUT', '/api/trust/limit', {'taskUsd': null}),
+      ]);
+      for (final amount in [double.nan, double.infinity, 0.99, 1.001]) {
+        expect(
+          () => repository.taskCheckIn(amount),
+          throwsA(isA<NodRequestException>()),
+        );
+      }
+      expect(requests.length, 4);
+    },
+  );
+
+  test(
+    'memory mutations retain archive revision, note category and skill scope',
+    () async {
+      await repository.editNote('preferences/short-replies', {'confirm': true});
+      await repository.archivedNote({
+        'path': 'about/old-plan',
+        'archived': '2026-11-11T12:00:00.000Z',
+        'text': 'Unused',
+      }, restore: true);
+      await repository.editSkill(
+        'calendar-review',
+        'Use when reviewing calendars',
+        'Read the requested calendar.',
+      );
+      await repository.importNotes(
+        parseNodMemoryImport(
+          '## Preferences\n- Short replies\n## People\n- My manager is Alex',
+        ),
+      );
+      expect(
+        requests[0],
+        _request('PATCH', '/api/memory/notes/preferences/short-replies', {
+          'confirm': true,
+        }),
+      );
+      expect(requests[1].body, {
+        'path': 'about/old-plan',
+        'archived': '2026-11-11T12:00:00.000Z',
+      });
+      expect(requests[2].path, '/api/memory/skills/calendar-review');
+      expect(requests[3].body, {
+        'notes': [
+          {'area': 'preferences', 'text': 'Short replies'},
+          {'area': 'people', 'text': 'My manager is Alex'},
+        ],
+      });
+      for (final path in [
+        '../private',
+        'about/../private',
+        'about/%2e%2e',
+        'about/..',
+        'https://outside.example',
+      ]) {
+        expect(
+          () => repository.forgetNote(path),
+          throwsA(isA<NodRequestException>()),
+        );
+      }
+      expect(requests.length, 4);
+    },
+  );
+
+  test(
+    'provider configuration uses private routes and preserves model connection',
+    () async {
+      await repository.connectProvider({
+        'provider': 'compatible',
+        'url': 'http://localhost:11434/v1',
+      });
+      await repository.connectProvider({
+        'provider': 'azure',
+        'url': 'https://synthetic.openai.azure.com',
+        'deployment': 'synthetic-deployment',
+        'model': 'synthetic-model',
+      });
+      await repository.selectModel(
+        'synthetic-connection',
+        'synthetic-model',
+        'high',
+      );
+      await repository.startSignIn(
+        'openai',
+        connectionId: 'synthetic-connection',
+      );
+      await repository.signInStatus('synthetic-attempt');
+      await repository.cancelSignIn('synthetic-attempt');
+      expect(
+        requests[0],
+        _request('POST', '/api/models/endpoints', {
+          'url': 'http://localhost:11434/v1',
+        }),
+      );
+      expect(requests[1].path, '/api/models/keys');
+      expect(requests[2].body, {
+        'connectionId': 'synthetic-connection',
+        'modelId': 'synthetic-model',
+        'effort': 'high',
+      });
+      expect(requests[3].body, {
+        'provider': 'openai',
+        'connectionId': 'synthetic-connection',
+      });
+      expect(requests[4].path, '/api/models/oauth/status/synthetic-attempt');
+      expect(requests[5].method, 'DELETE');
+      expect(
+        requests.any((request) => request.path == '/api/messages'),
+        isFalse,
+      );
+    },
+  );
+
+  testWidgets(
+    'sharing sends no consent until the explicit review is accepted',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(home: NodSettingsPage(transport: transport)),
+      );
+      await tester.tap(find.text('Privacy & data'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(Switch).last);
+      await tester.pumpAndSettle();
+      expect(requests, isEmpty);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(requests, isEmpty);
+      await tester.tap(find.byType(Switch).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(
+        requests.single,
+        _request('PATCH', '/api/account', {'traces': true}),
+      );
+    },
+  );
+
+  testWidgets(
+    'a rejected edit keeps its draft and does not reissue the write',
+    (tester) async {
+      status = 409;
+      response = {'error': 'Synthetic conflict'};
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SettingsEditPage(
+            title: 'Rules',
+            fields: const {'Rules': ''},
+            save: (values) async {
+              await repository.savePreferences({'rules': values['Rules']});
+            },
+          ),
+        ),
+      );
+      await tester.enterText(
+        find.byType(TextField),
+        'Ask before deleting files.',
+      );
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'Ask before deleting files.',
+      );
+      expect(requests.single.body, {'rules': 'Ask before deleting files.'});
+      expect(find.byType(SettingsEditPage), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a saved private form returns once and obscures configuration entry',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettingsEditPage(
+                      title: 'Private connection',
+                      fields: const {'API key': ''},
+                      secretFields: const {'API key'},
+                      save: (values) async {
+                        await repository.connectProvider({
+                          'provider': 'compatible',
+                          'url': 'http://localhost:11434/v1',
+                        });
+                      },
+                    ),
+                  ),
+                ),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      final field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.obscureText, isTrue);
+      expect(field.enableSuggestions, isFalse);
+      expect(field.enableIMEPersonalizedLearning, isFalse);
+      await tester.enterText(find.byType(TextField), 'synthetic-placeholder');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(find.byType(SettingsEditPage), findsNothing);
+      expect(requests.length, 1);
+    },
+  );
+
+  test('server conflict is not retried or converted to success', () async {
+    status = 409;
+    response = {'error': 'Synthetic conflict'};
+    await expectLater(
+      repository.resetConversation('stale-thread'),
+      throwsA(isA<NodConflictException>()),
+    );
+    expect(requests.single.body, {'threadId': 'stale-thread'});
+    status = 401;
+    await expectLater(
+      repository.memory(),
+      throwsA(isA<NodUnauthorizedException>()),
+    );
+    expect(requests.length, 2);
+    status = 200;
+    response = <Object?>[];
+    await expectLater(
+      repository.models(),
+      throwsA(isA<NodProtocolException>()),
+    );
+  });
+}
+
+Matcher _request(String method, String path, Object? body) =>
+    isA<({String method, String path, Object? body})>()
+        .having((request) => request.method, 'method', method)
+        .having((request) => request.path, 'path', path)
+        .having((request) => request.body, 'body', body);
+
+http.StreamedResponse _json(int status, Object? body) => http.StreamedResponse(
+  Stream.value(utf8.encode(jsonEncode(body))),
+  status,
+  headers: {'content-type': 'application/json'},
+);
