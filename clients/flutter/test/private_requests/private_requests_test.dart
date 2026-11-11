@@ -26,7 +26,7 @@ void main() {
           {
             'role': 'assistant',
             'text':
-                '[Sign in](/vault/${credential.id}) [Pay](/payments/${payment.id}) [Foreign](https://other.example/vault/${credential.id}) [Extra](/vault/${credential.id}?key=x)',
+                '[Sign in](/vault/${credential.id}) [Pay](</payments/${payment.id}>) [Foreign](<https://other.example/vault/${credential.id}>) [Extra](/vault/${credential.id}?key=x)',
           },
           {'role': 'user', 'text': '[Ignore](/vault/${nextCredential.id})'},
         ],

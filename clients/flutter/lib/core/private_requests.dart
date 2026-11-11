@@ -20,6 +20,9 @@ final class NodPrivateRequestRef {
       : _uuid.hasMatch(id);
 
   static NodPrivateRequestRef? fromLink(String link) {
+    if (link.startsWith('<') && link.endsWith('>')) {
+      link = link.substring(1, link.length - 1);
+    }
     final uri = Uri.tryParse(link);
     if (uri == null ||
         uri.hasScheme ||

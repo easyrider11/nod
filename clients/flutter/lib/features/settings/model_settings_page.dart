@@ -52,6 +52,14 @@ const _providers = [
   'compatible',
 ];
 
+String _connectionIdentity(Map<String, Object?> connection) {
+  final label = settingsText(connection, 'label');
+  final ending = connection['keyEnding'];
+  return ending is String && ending.isNotEmpty
+      ? '$label · Key …$ending'
+      : label;
+}
+
 class NodModelSettingsPage extends StatefulWidget {
   const NodModelSettingsPage({super.key, required this.repository});
   final NodSettingsRepository repository;
@@ -175,7 +183,7 @@ class _NodModelSettingsPageState extends State<NodModelSettingsPage> {
               child: ExpansionTile(
                 initiallyExpanded: true,
                 title: Text(
-                  '${connection['provider']} · ${connection['label']}',
+                  '${connection['provider']} · ${_connectionIdentity(connection)}',
                 ),
                 subtitle: Text(
                   '${connection['status']}${connection['managed'] == true ? ' · Managed by server' : ''}',
@@ -183,7 +191,7 @@ class _NodModelSettingsPageState extends State<NodModelSettingsPage> {
                 children: [
                   for (final model in settingsRows(connection['models']).where(
                     (model) =>
-                        '${model['name']} ${model['id']} ${connection['provider']} ${connection['label']}'
+                        '${model['name']} ${model['id']} ${connection['provider']} ${_connectionIdentity(connection)}'
                             .toLowerCase()
                             .contains(search),
                   ))
@@ -254,7 +262,7 @@ class _NodModelSettingsPageState extends State<NodModelSettingsPage> {
                             if (await confirmSettings(
                               context,
                               'Remove connection?',
-                              'Remove ${connection['label']}? If selected, choose a new model before continuing.',
+                              'Remove ${_connectionIdentity(connection)}? If selected, choose a new model before continuing.',
                             )) {
                               await state.change(
                                 () => repository.removeConnection(

@@ -31,7 +31,7 @@ OpenAI-compatible addresses refer to the computer running Nod, not your phone. A
 
 **ChatGPT sign-in** and OpenRouter's **Browser sign-in** open the provider's HTTPS address without passing the Nod token. Return to the sign-in page to check completion. For ChatGPT, paste the full callback address into the private **Callback URL** field if the final page cannot load. Leaving the page cancels the pending attempt. Server expiration and connection ownership still apply.
 
-Each connection lists its available models, capabilities, and supported effort levels. **Load models** refreshes its catalog. **Reconnect** restores browser sign-in. **Remove connection** asks before removal. Server-managed connections cannot be removed here. A running task keeps the model it started with.
+Each connection lists its available models, capabilities, and supported effort levels. When a key ending is available, the label, search, and removal confirmation show it so you can distinguish connections to the same provider. **Load models** refreshes its catalog. **Reconnect** restores browser sign-in. **Remove connection** asks before removal. Server-managed connections cannot be removed here. A running task keeps the model it started with.
 
 ## Set voice preferences
 

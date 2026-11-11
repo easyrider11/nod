@@ -81,25 +81,30 @@ class _NodPrivateBrowserState extends State<NodPrivateBrowser>
             setState(() => _image = frame);
             previous?.dispose();
           },
-          onError: (Object _) {
-            if (mounted && generation == _generation) {
-              setState(() {
-                _error = 'The browser view disconnected. Reconnect without repeating your last input.';
-                _image?.dispose();
-                _image = null;
-              });
-            }
-          },
-          onDone: () {
-            if (mounted && generation == _generation && !_done) {
-              setState(() {
-                _error = 'This browser view ended. Reconnect to check whether the handoff is still open.';
-                _image?.dispose();
-                _image = null;
-              });
-            }
-          },
+          onError: (Object _) => _lostView(
+            generation,
+            'The browser view disconnected. Reconnect without repeating your last input.',
+          ),
+          onDone: () => _lostView(
+            generation,
+            'This browser view ended. Reconnect to check whether the handoff is still open.',
+            cancelStream: false,
+          ),
         );
+  }
+
+  void _lostView(int generation, String message, {bool cancelStream = true}) {
+    if (!mounted || generation != _generation || _done) return;
+    ++_generation;
+    if (cancelStream) unawaited(_frames?.cancel());
+    _text.clear();
+    _pointer = null;
+    setState(() {
+      _failedInput = true;
+      _error = message;
+      _image?.dispose();
+      _image = null;
+    });
   }
 
   @override
@@ -139,6 +144,7 @@ class _NodPrivateBrowserState extends State<NodPrivateBrowser>
       try {
         await action();
       } catch (_) {
+        if (!mounted || generation != _generation) return;
         _failedInput = true;
         if (mounted) {
           setState(

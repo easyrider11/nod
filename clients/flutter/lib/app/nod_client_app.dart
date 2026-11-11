@@ -18,6 +18,7 @@ import '../features/scheduled/scheduled_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/tasks/tasks_page.dart';
 import '../features/usage/usage_page.dart';
+import '../features/vault/vault_page.dart';
 import '../motion/motion.dart';
 
 class NodClientApp extends StatefulWidget {
@@ -40,6 +41,7 @@ class NodClientApp extends StatefulWidget {
 
 class _NodClientAppState extends State<NodClientApp> {
   late final NodRepository _repository;
+  final _navigatorKey = GlobalKey<NavigatorState>();
   var _restoring = true;
   var _connected = false;
   var _selectedIndex = 0;
@@ -78,6 +80,7 @@ class _NodClientAppState extends State<NodClientApp> {
   }
 
   Future<void> _connect(NodConnectionConfig config) async {
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
     ++_themeEpoch;
     setState(() => _connectionError = null);
     try {
@@ -121,6 +124,7 @@ class _NodClientAppState extends State<NodClientApp> {
   }
 
   Future<void> _logOut() async {
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
     ++_themeEpoch;
     if (_repository case final HttpNodRepository repository) {
       await repository.forgetCredentials();
@@ -149,6 +153,7 @@ class _NodClientAppState extends State<NodClientApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Nod',
+      navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: NodTheme.light,
       darkTheme: NodTheme.dark,
@@ -443,6 +448,11 @@ class _ConnectedShell extends StatelessWidget {
           icon: Icons.settings_outlined,
           selectedIcon: Icons.settings,
         ),
+        const NodNavigationDestination(
+          label: 'Vault',
+          icon: Icons.shield_outlined,
+          selectedIcon: Icons.shield,
+        ),
       ],
     ];
     void showMessage(String id) {
@@ -526,6 +536,8 @@ class _ConnectedShell extends StatelessWidget {
                   transport: transport,
                   onThemeChanged: onThemeChanged,
                 )
+              : selectedIndex == 8 && transport != null
+              ? NodVaultPage(transport: transport)
               : _SectionPlaceholder(destination: destinations[selectedIndex]),
         ],
       ),

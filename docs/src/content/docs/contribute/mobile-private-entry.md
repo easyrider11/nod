@@ -7,6 +7,8 @@ The Flutter evaluation client can collect private sign-in details and payment ap
 
 Use the matching evaluation server and authenticated connection described in [Try the Flutter client](/contribute/mobile-evaluation/). These forms use the server's existing Vault requests. They don't create a second trust checker or store passwords on the phone.
 
+Opening a request from its original chat link keeps that exact request, even when it is older than recent chat. Payment links use the same private path. If a browser view disconnects, controls stop and queued inputs that haven't been sent are discarded. Reconnect to inspect the page; Nod doesn't repeat an input whose result is uncertain.
+
 ## Complete a private sign-in
 
 1. Open **Private requests** from the conversation, or open a task's private action.

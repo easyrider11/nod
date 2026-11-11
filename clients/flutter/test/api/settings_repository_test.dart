@@ -207,6 +207,50 @@ void main() {
     },
   );
 
+  testWidgets('same-provider connections are selectable by safe key identity', (
+    tester,
+  ) async {
+    response = {
+      'selection': null,
+      'connections': [
+        for (final ending in ['a111', 'b222'])
+          {
+            'id': 'connection-$ending',
+            'provider': 'openai',
+            'label': 'OpenAI',
+            'status': 'connected',
+            'method': 'key',
+            'keyEnding': ending,
+            'models': [
+              {
+                'id': 'synthetic-model',
+                'name': 'Synthetic model',
+                'contextWindow': 4096,
+                'efforts': <String>[],
+              },
+            ],
+          },
+      ],
+    };
+    await tester.pumpWidget(
+      MaterialApp(home: NodSettingsPage(transport: transport)),
+    );
+    await tester.tap(find.text('Models'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'b222');
+    await tester.pumpAndSettle();
+    final model = find.text('Synthetic model');
+    expect(model, findsOneWidget);
+    await tester.ensureVisible(model);
+    await tester.tap(model);
+    await tester.pumpAndSettle();
+    expect(requests.where((request) => request.method != 'GET').single.body, {
+      'connectionId': 'connection-b222',
+      'modelId': 'synthetic-model',
+      'effort': 'off',
+    });
+  });
+
   testWidgets(
     'sharing sends no consent until the explicit review is accepted',
     (tester) async {

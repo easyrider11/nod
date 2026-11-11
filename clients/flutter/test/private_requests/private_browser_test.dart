@@ -9,6 +9,50 @@ import 'package:nod_client/core/private_requests.dart';
 import 'package:nod_client/features/private_requests/private_browser.dart';
 
 void main() {
+  for (final end in [false, true]) {
+    testWidgets(
+      'view ${end ? 'ending' : 'failure'} drops queued input without replay',
+      (tester) async {
+        final fixture = BrowserFixture();
+        if (!end) addTearDown(fixture.frames.close);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: NodPrivateBrowser(
+              repository: NodPrivateRequestsRepository(fixture),
+              turnId: fixture.turn,
+            ),
+          ),
+        );
+        await showFrame(tester, fixture);
+        final point = tester.getCenter(find.byType(RawImage));
+        await tester.tapAt(point);
+        await tester.pump();
+        await tester.tapAt(point);
+        await tester.pump();
+        expect(fixture.calls.length, 1);
+        if (end) {
+          unawaited(fixture.frames.close());
+        } else {
+          fixture.frames.addError(StateError('Synthetic view failure'));
+        }
+        await tester.pumpAndSettle();
+        fixture.input.complete({'ok': true});
+        await tester.pumpAndSettle();
+        expect(fixture.calls.length, 1);
+        expect(find.byType(RawImage), findsNothing);
+        if (!end) {
+          await tester.ensureVisible(find.text('Reconnect view'));
+          await tester.tap(find.text('Reconnect view'));
+          await tester.pumpAndSettle();
+          await showFrame(tester, fixture);
+          expect(find.byType(RawImage), findsOneWidget);
+          expect(fixture.calls.length, 1);
+        }
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+      },
+    );
+  }
   testWidgets(
     'backgrounding drops queued browser input without dispatch or resume',
     (tester) async {
