@@ -1,5 +1,6 @@
 import '../../core/attachments.dart';
 import '../../core/core.dart';
+import '../../core/rich_results.dart';
 
 enum ChatFailureKind {
   offline,
@@ -66,6 +67,8 @@ final class ChatMessageItem {
     this.turnId,
     this.replyToMessageId,
     this.reaction,
+    this.reactions = const [],
+    this.presentation,
     this.answerChoices,
     this.attachments = const [],
     this.isPending = false,
@@ -83,6 +86,8 @@ final class ChatMessageItem {
       turnId: message.turnId,
       replyToMessageId: message.replyToMessageId,
       reaction: message.reaction,
+      reactions: message.reactions,
+      presentation: message.presentation,
       answerChoices: message.answerChoices,
     );
   }
@@ -92,6 +97,8 @@ final class ChatMessageItem {
   final String? turnId;
   final String? replyToMessageId;
   final String? reaction;
+  final List<({String actor, String reaction})> reactions;
+  final NodRichResult? presentation;
   final NodAnswerChoices? answerChoices;
   final List<NodArtifact> attachments;
   final NodMessageRole role;
@@ -116,6 +123,8 @@ final class ChatMessageItem {
       turnId: turnId,
       replyToMessageId: replyToMessageId,
       reaction: reaction,
+      reactions: reactions,
+      presentation: presentation,
       answerChoices: answerChoices,
       isPending: isPending ?? this.isPending,
       isStreaming: isStreaming ?? this.isStreaming,

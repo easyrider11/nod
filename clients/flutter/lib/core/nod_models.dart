@@ -1,4 +1,5 @@
 import 'attachments.dart';
+import 'rich_results.dart';
 
 enum NodMessageRole { owner, assistant, system }
 
@@ -49,6 +50,8 @@ final class NodMessage {
     this.turnId,
     this.replyToMessageId,
     this.reaction,
+    this.reactions = const [],
+    this.presentation,
     this.answerChoices,
     this.answerChoicesPending = false,
     this.attachments = const [],
@@ -59,6 +62,8 @@ final class NodMessage {
   final String? turnId;
   final String? replyToMessageId;
   final String? reaction;
+  final List<({String actor, String reaction})> reactions;
+  final NodRichResult? presentation;
   final NodAnswerChoices? answerChoices;
   final bool answerChoicesPending;
   final List<NodArtifact> attachments;
@@ -141,6 +146,8 @@ abstract interface class NodReplyRepository {
     required String replyToMessageId,
     List<String>? choiceIds,
     bool customAnswer = false,
+    List<NodArtifact> attachments = const [],
+    NodUploadFile? recording,
   });
 }
 

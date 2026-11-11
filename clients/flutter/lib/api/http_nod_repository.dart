@@ -12,6 +12,7 @@ import '../core/attachments.dart';
 import '../core/audio.dart';
 import '../core/core.dart';
 import '../core/private_requests.dart';
+import '../core/rich_results.dart';
 import '../core/schedules.dart';
 import '../core/usage.dart';
 import 'sse.dart';
@@ -26,6 +27,8 @@ final class HttpNodRepository
         NodMessageFocusRepository,
         NodPrivateBrowserTransport,
         NodApiTransport,
+        NodBinaryTransport,
+        NodConnectionScope,
         NodAppsRepository,
         NodAttachmentsRepository,
         NodAudioRepository,
@@ -86,6 +89,9 @@ final class HttpNodRepository
     phase: NodConnectionPhase.disconnected,
   );
   var _generation = 0;
+
+  @override
+  int get connectionGeneration => _generation;
   var _retryIndex = 0;
   var _disposed = false;
 
@@ -273,9 +279,25 @@ final class HttpNodRepository
     required String replyToMessageId,
     List<String>? choiceIds,
     bool customAnswer = false,
+    List<NodArtifact> attachments = const [],
+    NodUploadFile? recording,
   }) async {
-    if (text.trim().isEmpty || (choiceIds != null && customAnswer)) {
+    if ((text.trim().isEmpty && attachments.isEmpty && recording == null) ||
+        (choiceIds != null && (customAnswer || recording != null))) {
       throw const NodRequestException();
+    }
+    if (recording != null) {
+      await _sendAudio(
+        text,
+        recording,
+        clientMessageId: clientMessageId,
+        attachments: attachments,
+        threadId: threadId,
+        replyToMessageId: replyToMessageId,
+        customAnswer: customAnswer,
+      );
+      await _reconcile(emit: true);
+      return;
     }
     await _requestJson(
       'POST',
@@ -285,6 +307,7 @@ final class HttpNodRepository
         'clientMessageId': clientMessageId,
         'threadId': threadId,
         'replyToMessageId': replyToMessageId,
+        'attachmentIds': attachments.map((file) => file.id).toList(),
         if (choiceIds != null) 'questionAnswer': {'choiceIds': choiceIds},
         if (customAnswer) 'questionAnswer': {'custom': true},
       },
@@ -298,9 +321,25 @@ final class HttpNodRepository
     NodUploadFile recording, {
     required String clientMessageId,
     List<NodArtifact> attachments = const [],
+  }) => _sendAudio(
+    text,
+    recording,
+    clientMessageId: clientMessageId,
+    attachments: attachments,
+    threadId: _threadId,
+  );
+
+  Future<void> _sendAudio(
+    String text,
+    NodUploadFile recording, {
+    required String clientMessageId,
+    required String? threadId,
+    List<NodArtifact> attachments = const [],
+    String? replyToMessageId,
+    bool customAnswer = false,
   }) async {
     _ensureConnected();
-    if (_threadId == null ||
+    if (threadId == null ||
         recording.size <= 0 ||
         recording.size > 25 * 1024 * 1024) {
       throw const NodRequestException();
@@ -317,7 +356,9 @@ final class HttpNodRepository
       request.fields['message'] = jsonEncode({
         'text': text.trim(),
         'clientMessageId': clientMessageId,
-        'threadId': _threadId,
+        'threadId': threadId,
+        'replyToMessageId': ?replyToMessageId,
+        if (customAnswer) 'questionAnswer': {'custom': true},
         'attachmentIds': attachments.map((file) => file.id).toList(),
       });
       request.files.add(
@@ -1041,6 +1082,11 @@ final class HttpNodRepository
     String path, {
     Map<String, Object?>? body,
   }) {
+    _validateApiPath(path);
+    return _requestJson(method, path, body: body);
+  }
+
+  void _validateApiPath(String path) {
     final uri = Uri.tryParse(path);
     if (uri == null ||
         uri.hasScheme ||
@@ -1050,7 +1096,73 @@ final class HttpNodRepository
         uri.pathSegments.any((segment) => segment == '..' || segment == '.')) {
       throw const NodProtocolException();
     }
-    return _requestJson(method, path, body: body);
+  }
+
+  @override
+  Future<NodBinaryResponse> requestBytes(
+    String method,
+    String path, {
+    Map<String, Object?>? body,
+  }) {
+    _validateApiPath(path);
+    return _requestBytes(method, path, body: body);
+  }
+
+  Future<NodBinaryResponse> _requestBytes(
+    String method,
+    String path, {
+    Map<String, Object?>? body,
+  }) async {
+    _ensureConnected();
+    final generation = _generation;
+    final abort = Completer<void>();
+    final timer = Timer(requestTimeout, () => abort.complete());
+    try {
+      Future<NodBinaryResponse> perform() async {
+        final request = http.AbortableRequest(
+          method,
+          _uri(path),
+          abortTrigger: abort.future,
+        )..followRedirects = false;
+        request.headers.addAll(_headers(json: body != null));
+        request.headers['Accept'] = '*/*';
+        if (body != null) request.body = jsonEncode(body);
+        final response = await _apiClient.send(request).timeout(requestTimeout);
+        final bytes = <int>[];
+        await for (final chunk in response.stream.timeout(requestTimeout)) {
+          if (!_isCurrent(generation)) throw const NodRequestException();
+          if (bytes.length + chunk.length > 16 * 1024 * 1024) {
+            throw const NodProtocolException();
+          }
+          bytes.addAll(chunk);
+        }
+        if (!_isCurrent(generation)) throw const NodRequestException();
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw _statusError(
+            response.statusCode,
+            utf8.decode(bytes, allowMalformed: true),
+          );
+        }
+        return NodBinaryResponse(
+          bytes: List.unmodifiable(bytes),
+          mimeType:
+              response.headers['content-type']?.split(';').first.trim() ??
+              'application/octet-stream',
+        );
+      }
+
+      return await perform().timeout(requestTimeout);
+    } on NodException {
+      rethrow;
+    } catch (error) {
+      if (error is http.RequestAbortedException) {
+        throw const NodTimeoutException();
+      }
+      throw _transportError(error);
+    } finally {
+      timer.cancel();
+      if (!abort.isCompleted) abort.complete();
+    }
   }
 
   Future<Object?> _requestJson(
@@ -1059,14 +1171,17 @@ final class HttpNodRepository
     Map<String, Object?>? body,
   }) async {
     _ensureConnected();
+    final generation = _generation;
     final request = http.Request(method, _uri(path))..followRedirects = false;
     request.headers.addAll(_headers(json: body != null));
     if (body != null) request.body = jsonEncode(body);
     try {
       final response = await _apiClient.send(request).timeout(requestTimeout);
+      if (!_isCurrent(generation)) throw const NodRequestException();
       final responseBody = await response.stream.bytesToString().timeout(
         requestTimeout,
       );
+      if (!_isCurrent(generation)) throw const NodRequestException();
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw _statusError(response.statusCode, responseBody);
       }
@@ -1183,6 +1298,25 @@ final class HttpNodRepository
       turnId: _string(json['turnId']),
       replyToMessageId: _string(json['replyToMessageId']),
       reaction: _string(json['reaction']),
+      presentation: role == NodMessageRole.assistant
+          ? NodRichResult.parse(json['presentation'])
+          : null,
+      reactions: json['reactions'] is List
+          ? (json['reactions'] as List)
+                .whereType<Map<Object?, Object?>>()
+                .where(
+                  (item) =>
+                      const {'user', 'assistant'}.contains(item['actor']) &&
+                      item['reaction'] is String,
+                )
+                .map(
+                  (item) => (
+                    actor: item['actor'] as String,
+                    reaction: item['reaction'] as String,
+                  ),
+                )
+                .toList()
+          : const [],
       answerChoices:
           role == NodMessageRole.assistant && json['answerChoices'] != null
           ? _parseChoices(json['answerChoices'])

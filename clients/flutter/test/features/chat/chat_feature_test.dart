@@ -1,18 +1,160 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nod_client/core/api_transport.dart';
 import 'package:nod_client/core/attachments.dart';
 import 'package:nod_client/core/core.dart';
+import 'package:nod_client/core/rich_results.dart' as results;
 import 'package:nod_client/design_system/design_system.dart';
 import 'package:nod_client/features/chat/agent_message_body.dart';
 import 'package:nod_client/features/chat/chat.dart';
 import 'package:nod_client/features/chat/chat_testing.dart';
+import 'package:nod_client/features/connections/connection_setup_page.dart';
+import 'package:nod_client/features/private_requests/private_requests_page.dart';
+import 'package:nod_client/features/results/rich_result.dart';
 import 'package:nod_client/motion/motion.dart';
 
 void main() {
+  testWidgets(
+    'discovered connection Markdown opens authenticated setup with exact proposal and display name',
+    (tester) async {
+      const proposal = 'c5ed5115-813d-4d3d-a6ce-94b6d36ce004';
+      final backend = FakeNodRepository(
+        state: NodState(
+          messages: [
+            NodMessage(
+              id: 'discovery',
+              role: NodMessageRole.assistant,
+              text: '[Example Service](/apps?connect=$proposal)',
+              createdAt: DateTime(2026),
+            ),
+          ],
+          turn: NodTurnState.idle,
+          revision: '1',
+        ),
+      );
+      addTearDown(backend.dispose);
+      final repository = _PrivateLinkRepository(backend);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: NodTheme.light,
+          home: Scaffold(body: NodChat(repository: repository)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final markdown = tester.widget<MarkdownBody>(find.byType(MarkdownBody));
+      markdown.onTapLink!('Example Service', '/apps?connect=$proposal', '');
+      await tester.pumpAndSettle();
+      final setup = tester.widget<NodConnectionSetupPage>(
+        find.byType(NodConnectionSetupPage),
+      );
+      expect(setup.discoveryId, proposal);
+      expect(setup.name, 'Example Service');
+      expect(repository.reads, contains('/api/apps/discovery/$proposal'));
+      expect(backend.sentTexts, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'private Markdown link opens its exact bound native request without sending chat',
+    (tester) async {
+      final credentialId = 'a' * 43;
+      final backend = FakeNodRepository(
+        state: NodState(
+          messages: [
+            NodMessage(
+              id: 'private',
+              role: NodMessageRole.assistant,
+              text: '[Private sign-in](/credentials/$credentialId)',
+              createdAt: DateTime(2026),
+            ),
+          ],
+          turn: NodTurnState.idle,
+          revision: '1',
+        ),
+      );
+      addTearDown(backend.dispose);
+      final repository = _PrivateLinkRepository(backend);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: NodTheme.light,
+          home: Scaffold(body: NodChat(repository: repository)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final markdown = tester.widget<MarkdownBody>(find.byType(MarkdownBody));
+      markdown.onTapLink!('Private sign-in', '/credentials/$credentialId', '');
+      await tester.pumpAndSettle();
+      expect(find.byType(NodPrivateEntry), findsOneWidget);
+      expect(
+        repository.reads,
+        contains('/api/credential-requests/$credentialId'),
+      );
+      expect(backend.sentTexts, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'persisted presentation-only results render chart values and booking certainty in chat',
+    (tester) async {
+      final values = jsonDecode(
+        File('test/fixtures/client-api/rich-results.json').readAsStringSync(),
+      ) as List;
+      for (final index in [0, 1, 2, 4, 5]) {
+        final visual = results.NodRichResult.parse(values[index])!;
+        final repository = FakeNodRepository(
+          state: NodState(
+            messages: [
+              NodMessage(
+                id: 'result-$index',
+                role: NodMessageRole.assistant,
+                text: '',
+                createdAt: DateTime(2026),
+                presentation: visual,
+              ),
+            ],
+            turn: NodTurnState.idle,
+            revision: '1',
+          ),
+        );
+        addTearDown(repository.dispose);
+        await _pumpChat(tester, repository);
+        expect(find.byType(NodRichResult), findsOneWidget);
+        expect(find.text(visual.title), findsOneWidget);
+        if (index == 0) {
+          expect(find.text('value: -12'), findsOneWidget);
+          expect(find.text('value: 28'), findsOneWidget);
+        }
+        if (index == 1) {
+          expect(find.text('status: pending'), findsOneWidget);
+          expect(find.text('value: USD 128'), findsOneWidget);
+          expect(find.text('status: option'), findsOneWidget);
+        }
+        if (index == 2) {
+          expect(find.text('status: unknown'), findsOneWidget);
+          expect(find.text('operated by: Example Regional'), findsOneWidget);
+          expect(find.text('time zone: UTC'), findsNWidgets(2));
+        }
+        if (index == 4) {
+          expect(
+            find.textContaining('Availability not verified'),
+            findsOneWidget,
+          );
+          expect(find.text('scope: selection'), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    },
+  );
+
   testWidgets(
     'task message navigation anchors older messages and updates the addressed reply',
     (tester) async {
@@ -1377,5 +1519,41 @@ Future<void> _pumpChat(
     await tester.pumpAndSettle();
   } else {
     await tester.pump();
+  }
+}
+
+class _PrivateLinkRepository implements NodRepository, NodApiTransport {
+  _PrivateLinkRepository(this.backend);
+  final FakeNodRepository backend;
+  final List<String> reads = [];
+  @override
+  Stream<NodConnectionState> get connectionStates => backend.connectionStates;
+  @override
+  Stream<NodEvent> get events => backend.events;
+  @override
+  Future<void> connect(NodConnectionConfig config) => backend.connect(config);
+  @override
+  Future<void> disconnect() => backend.disconnect();
+  @override
+  Future<NodState> loadState() => backend.loadState();
+  @override
+  Future<NodHistory> loadHistory({String? cursor}) =>
+      backend.loadHistory(cursor: cursor);
+  @override
+  Future<void> sendText(String text, {required String clientMessageId}) =>
+      backend.sendText(text, clientMessageId: clientMessageId);
+  @override
+  Future<void> stop() => backend.stop();
+  @override
+  Future<Object?> requestJson(
+    String method,
+    String path, {
+    Map<String, Object?>? body,
+  }) async {
+    reads.add(path);
+    if (path == '/api/state') {
+      return {'messages': <Object?>[], 'turns': <Object?>[]};
+    }
+    throw const NodRequestException();
   }
 }

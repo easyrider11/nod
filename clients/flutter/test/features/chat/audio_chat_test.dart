@@ -14,6 +14,7 @@ import 'package:nod_client/features/chat/chat_controller.dart';
 import 'package:nod_client/features/chat/chat_view.dart';
 import 'package:nod_client/features/chat/fakes/fake_nod_repository.dart';
 import 'package:nod_client/features/chat/voice_draft.dart';
+import 'package:nod_client/features/results/artifact_preview.dart';
 
 class AudioRepository implements NodRepository, NodAudioRepository {
   final backend = FakeNodRepository();
@@ -102,6 +103,7 @@ class ClipRepository implements NodAttachmentsRepository {
   bool fail = false;
   Completer<void>? gate;
   File? destination;
+  String? content;
   @override
   Future<void> downloadAttachment(
     NodArtifact artifact,
@@ -112,7 +114,11 @@ class ClipRepository implements NodAttachmentsRepository {
     destination = file;
     await gate?.future;
     if (fail) throw StateError('synthetic download failure');
-    await file.writeAsBytes(List<int>.filled(100, 0));
+    if (content != null) {
+      await file.writeAsString(content!);
+    } else {
+      await file.writeAsBytes(List<int>.filled(100, 0));
+    }
   }
 
   @override
@@ -126,6 +132,74 @@ void main() {
         const MethodChannel('com.llfbandit.record/messages'),
         (_) async => null,
       );
+  for (final format in ['text/html', 'image/svg+xml', 'application/xml']) {
+    testWidgets(
+      'active $format artifact stays literal without image or web execution',
+      (tester) async {
+        final root = await tester.runAsync(
+          () => Directory.systemTemp.createTemp('nod-active-preview-'),
+        );
+        addTearDown(() async {
+          if (await root!.exists()) await root.delete(recursive: true);
+        });
+        const active =
+            '<svg onload="fetch(\'https://example.com/beacon\')"><script>alert(document.cookie)</script></svg>';
+        final repository = ClipRepository()..content = active;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: NodArtifactPreview(
+                artifact: NodArtifact(
+                  id: 'synthetic',
+                  name: 'active.html',
+                  mimeType: format,
+                  size: active.length,
+                ),
+                repository: repository,
+                temporaryDirectory: () async => root!,
+              ),
+            ),
+          ),
+        );
+        for (
+          var attempt = 0;
+          attempt < 10 && find.text(active).evaluate().isEmpty;
+          attempt++
+        ) {
+          await tester.pump();
+          await tester.runAsync(() async {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          });
+        }
+        await tester.pump();
+        expect(
+          find.text(active),
+          findsOneWidget,
+          reason: tester
+              .widgetList<Text>(find.byType(Text))
+              .map((w) => w.data)
+              .join(' | '),
+        );
+        expect(find.byType(Image), findsNothing);
+        expect(find.text('Open or save'), findsOneWidget);
+        expect(repository.downloads, 1);
+        final path = repository.destination!;
+        await tester.pumpWidget(const SizedBox.shrink());
+        for (
+          var attempt = 0;
+          attempt < 10 && await tester.runAsync(path.exists) == true;
+          attempt++
+        ) {
+          await tester.pump();
+          await tester.runAsync(() async {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          });
+        }
+        expect(await tester.runAsync(path.exists), false);
+      },
+    );
+  }
+
   const file = NodUploadFile(
     path: '/synthetic/voice.wav',
     name: 'voice.wav',

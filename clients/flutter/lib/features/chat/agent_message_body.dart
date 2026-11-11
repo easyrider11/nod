@@ -9,12 +9,14 @@ class AgentMessageBody extends StatefulWidget {
     required this.text,
     this.streaming = false,
     this.active = true,
+    this.onArtifactLink,
     super.key,
   });
 
   final String text;
   final bool streaming;
   final bool active;
+  final bool Function(String href, String label)? onArtifactLink;
 
   @override
   State<AgentMessageBody> createState() => _AgentMessageBodyState();
@@ -144,11 +146,18 @@ class _AgentMessageBodyState extends State<AgentMessageBody>
         alt?.isNotEmpty == true ? alt! : 'Image',
         style: body.copyWith(color: colors.onSurfaceVariant),
       ),
-      onTapLink: (label, href, title) => _openLink(context, href),
+      onTapLink: (label, href, title) => _openLink(context, href, label),
     );
   }
 
-  Future<void> _openLink(BuildContext context, String? href) async {
+  Future<void> _openLink(
+    BuildContext context,
+    String? href,
+    String label,
+  ) async {
+    if (href != null && widget.onArtifactLink?.call(href, label) == true) {
+      return;
+    }
     final uri = Uri.tryParse(href ?? '');
     if (uri == null ||
         !const {'https', 'http'}.contains(uri.scheme) ||

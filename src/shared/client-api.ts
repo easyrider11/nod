@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { presentationSchema } from './presentation';
 import { answerChoicesSchema, questionAnswerSchema, type QuestionAnswer } from './answer-choices';
 import type { SessionResponse } from './account';
 import type {
@@ -30,6 +31,7 @@ export type ClientMessage = Pick<
   | 'answerChoices'
   | 'answerChoicesPending'
   | 'reactions'
+  | 'presentation'
 >;
 export type ClientState = Omit<
   Pick<
@@ -97,6 +99,7 @@ export const clientMessageSchema: z.ZodType<ClientMessage> = z.looseObject({
   streamId: z.string().nullable().optional(),
   reaction: z.string().nullable().optional(),
   replyToMessageId: z.uuid().nullable().optional(),
+  presentation: presentationSchema.optional(),
   answerChoices: answerChoicesSchema.optional(),
   answerChoicesPending: z.boolean().optional(),
   reactions: z

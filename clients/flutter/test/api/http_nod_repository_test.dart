@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:nod_client/api/api.dart';
+import 'package:nod_client/api/rich_results_repository.dart';
+import 'package:nod_client/core/api_transport.dart';
 import 'package:nod_client/core/app_connections.dart';
 import 'package:nod_client/core/attachments.dart';
 import 'package:nod_client/core/core.dart';
@@ -12,7 +14,6 @@ import 'package:nod_client/core/usage.dart';
 import 'package:nod_client/features/chat/chat.dart';
 
 import '../fixtures/schedule_fixture.dart';
-
 import '../fixtures/usage_fixture.dart';
 
 void main() {
@@ -21,6 +22,287 @@ void main() {
     origin: Uri.parse('https://nod.example.test'),
     token: token,
   );
+
+  test('JSON discards an old pairing response and exposes only a credential-free generation', () async {
+    final connections = [EventConnection(), EventConnection()];
+    var index = 0;
+    final started = Completer<void>();
+    final listening = Completer<void>();
+    final body = StreamController<List<int>>()..onListen = listening.complete;
+    final client = RoutingClient((request) async {
+      if (request.url.path == '/api/memory/stale') {
+        started.complete();
+        return http.StreamedResponse(body.stream, 200);
+      }
+      return switch (request.url.path) {
+        '/api/client/capabilities' => _jsonResponse(200, _capabilities()),
+        '/api/session' => _jsonResponse(200, _session()),
+        '/api/state' => _jsonResponse(200, _state()),
+        _ => _jsonResponse(404, {}),
+      };
+    });
+    final repository = HttpNodRepository(
+      credentials: MemoryCredentials(),
+      client: client,
+      eventClientFactory: () => connections[index++].client,
+    );
+    addTearDown(repository.dispose);
+    await repository.connect(config);
+    final NodConnectionScope scope = repository;
+    final generation = scope.connectionGeneration;
+    final old = repository.requestJson('GET', '/api/memory/stale');
+    final refusal = expectLater(old, throwsA(isA<NodRequestException>()));
+    await started.future;
+    await listening.future;
+    await repository.disconnect();
+    await repository.connect(
+      NodConnectionConfig(
+        origin: Uri.parse('https://replacement.example.test'),
+        token: 'synthetic-replacement',
+      ),
+    );
+    expect(scope.connectionGeneration, greaterThan(generation));
+    body.add(utf8.encode('{"private":"old pairing data"}'));
+    await body.close();
+    await refusal;
+    expect(
+      await repository.requestJson('GET', '/api/state'),
+      isA<Map<Object?, Object?>>(),
+    );
+  });
+
+  test('binary transport applies a whole-response deadline even while bytes keep arriving', () async {
+    final events = EventConnection();
+    final client = RoutingClient((request) async {
+      if (request.url.path == '/api/speech/preview') {
+        return http.StreamedResponse(
+          Stream<int>.periodic(
+            const Duration(milliseconds: 5),
+            (i) => i,
+          ).take(100).map((i) => [i]),
+          200,
+        );
+      }
+      return switch (request.url.path) {
+        '/api/client/capabilities' => _jsonResponse(200, _capabilities()),
+        '/api/session' => _jsonResponse(200, _session()),
+        '/api/state' => _jsonResponse(200, _state()),
+        _ => _jsonResponse(404, {}),
+      };
+    });
+    final repository = HttpNodRepository(
+      credentials: MemoryCredentials(),
+      client: client,
+      eventClientFactory: () => events.client,
+      requestTimeout: const Duration(milliseconds: 40),
+    );
+    addTearDown(repository.dispose);
+    await repository.connect(config);
+    await expectLater(
+      repository.requestBytes(
+        'POST',
+        '/api/speech/preview',
+        body: {'text': 'Synthetic'},
+      ),
+      throwsA(isA<NodTimeoutException>()),
+    );
+  });
+
+  test('binary transport contains auth, refuses redirects, bounds bytes and fences disconnect', () async {
+    final events = EventConnection();
+    var mode = 'ok';
+    final gate = Completer<void>();
+    final started = Completer<void>();
+    final seen = <http.BaseRequest>[];
+    final client = RoutingClient((request) async {
+      if (request.url.path == '/api/memory/export' ||
+          request.url.path == '/api/speech/preview') {
+        seen.add(request);
+        expect(request.headers['Authorization'], 'Bearer $token');
+        expect(request.followRedirects, false);
+        if (request.method == 'POST') {
+          expect(jsonDecode(utf8.decode(await request.finalize().toBytes())), {
+            'text': 'Synthetic preview',
+          });
+        }
+        if (mode == 'redirect') {
+          return http.StreamedResponse(
+            Stream.value([]),
+            302,
+            headers: {'location': 'https://other.example/'},
+          );
+        }
+        if (mode == 'large') {
+          return http.StreamedResponse(
+            Stream.value(List.filled(16 * 1024 * 1024 + 1, 0)),
+            200,
+          );
+        }
+        if (mode == 'delayed') {
+          started.complete();
+          await gate.future;
+        }
+        return http.StreamedResponse(
+          Stream.value(utf8.encode('# Synthetic note')),
+          200,
+          headers: {'content-type': 'text/markdown; charset=utf-8'},
+        );
+      }
+      return switch (request.url.path) {
+        '/api/client/capabilities' => _jsonResponse(200, _capabilities()),
+        '/api/session' => _jsonResponse(200, _session()),
+        '/api/state' => _jsonResponse(200, _state()),
+        _ => _jsonResponse(404, {}),
+      };
+    });
+    final repository = HttpNodRepository(
+      credentials: MemoryCredentials(),
+      client: client,
+      eventClientFactory: () => events.client,
+    );
+    addTearDown(repository.dispose);
+    await repository.connect(config);
+    final NodBinaryTransport binary = repository;
+    final response = await binary.requestBytes('GET', '/api/memory/export');
+    expect(utf8.decode(response.bytes), '# Synthetic note');
+    expect(response.mimeType, 'text/markdown');
+    await binary.requestBytes(
+      'POST',
+      '/api/speech/preview',
+      body: {'text': 'Synthetic preview'},
+    );
+    final requests = seen.length;
+    for (final path in [
+      'https://other.example/api/data',
+      '//other.example/api/data',
+      '/api/../private',
+      '/api/data#token',
+      '/api/%2e%2e/private',
+    ]) {
+      await expectLater(
+        Future.sync(() => binary.requestBytes('GET', path)),
+        throwsA(isA<NodProtocolException>()),
+      );
+    }
+    expect(seen.length, requests);
+    mode = 'redirect';
+    await expectLater(
+      binary.requestBytes('GET', '/api/memory/export'),
+      throwsA(isA<NodException>()),
+    );
+    mode = 'large';
+    await expectLater(
+      binary.requestBytes('GET', '/api/memory/export'),
+      throwsA(isA<NodProtocolException>()),
+    );
+    mode = 'delayed';
+    final late = binary.requestBytes('GET', '/api/memory/export');
+    final refusal = expectLater(late, throwsA(isA<NodException>()));
+    await started.future;
+    await repository.disconnect();
+    gate.complete();
+    await refusal;
+    expect(
+      seen.every((request) => request.url.host == config.origin.host),
+      true,
+    );
+  });
+
+  test('rich state, reactions and addressed attachment and voice messages use actual routes', () async {
+    final visuals = jsonDecode(
+      await File('test/fixtures/client-api/rich-results.json').readAsString(),
+    ) as List;
+    final events = EventConnection();
+    final writes = <Map<String, Object?>>[];
+    final state = _state(
+      messages: [
+        for (var i = 0; i < visuals.length; i++)
+          {
+            ..._message('visual-$i', null, ''),
+            'role': 'assistant',
+            'presentation': visuals[i],
+            'reactions': [
+              {'actor': 'user', 'reaction': '👍'},
+            ],
+          },
+      ],
+    );
+    final client = RoutingClient((request) async {
+      if (request.method == 'POST' && request.url.path == '/api/messages') {
+        writes.add(
+          Map<String, Object?>.from(
+            jsonDecode(utf8.decode(await request.finalize().toBytes())) as Map,
+          ),
+        );
+        return _jsonResponse(200, {'ok': true});
+      }
+      if (request.url.path == '/api/messages/audio') {
+        final body = utf8.decode(await request.finalize().toBytes());
+        expect(body, contains('"threadId":"thread-1"'));
+        expect(body, contains('"replyToMessageId":"visual-0"'));
+        expect(body, contains('"questionAnswer":{"custom":true}'));
+        expect(body, contains('"clientMessageId":"voice-reply"'));
+        expect(body, contains('"attachmentIds":["artifact"]'));
+        return _jsonResponse(200, {'ok': true});
+      }
+      if (request.url.path == '/api/messages/visual-0/reaction') {
+        expect(jsonDecode(utf8.decode(await request.finalize().toBytes())), {
+          'reaction': null,
+        });
+        return _jsonResponse(200, {'ok': true});
+      }
+      return switch (request.url.path) {
+        '/api/client/capabilities' => _jsonResponse(200, _capabilities()),
+        '/api/session' => _jsonResponse(200, _session()),
+        '/api/state' => _jsonResponse(200, state),
+        '/api/messages' => _jsonResponse(200, {
+          'messages': state['messages'],
+          'hasMore': false,
+        }),
+        _ => _jsonResponse(404, {}),
+      };
+    });
+    final repository = HttpNodRepository(
+      credentials: MemoryCredentials(),
+      client: client,
+      eventClientFactory: () => events.client,
+    );
+    addTearDown(repository.dispose);
+    await repository.connect(config);
+    final loaded = await repository.loadState();
+    expect(loaded.messages.map((m) => m.presentation?.data), visuals);
+    expect(loaded.messages.first.reactions.single.reaction, '👍');
+    final controller = ChatController(repository);
+    addTearDown(controller.dispose);
+    await controller.start();
+    controller.replyTo(controller.messages.first);
+    const artifact = NodArtifact(
+      id: 'artifact',
+      name: 'Synthetic.txt',
+      mimeType: 'text/plain',
+      size: 1,
+    );
+    expect(await controller.sendText('', attachments: [artifact]), true);
+    expect(writes.single['replyToMessageId'], 'visual-0');
+    expect(writes.single['attachmentIds'], ['artifact']);
+    expect(writes.single['threadId'], 'thread-1');
+    expect(controller.replyTarget, isNull);
+    await repository.sendReply(
+      '',
+      clientMessageId: 'voice-reply',
+      threadId: 'thread-1',
+      replyToMessageId: 'visual-0',
+      customAnswer: true,
+      attachments: [artifact],
+      recording: NodUploadFile(
+        name: 'synthetic.wav',
+        size: 4,
+        mimeType: 'audio/wav',
+        read: () => Stream.value([0, 0, 0, 0]),
+      ),
+    );
+    await NodRichResultsRepository(repository).react('visual-0', null);
+  });
 
   test('addressed question replies preserve choices, retries, stale and reset fencing', () async {
     final events = EventConnection();

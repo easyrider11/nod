@@ -4,6 +4,8 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../../api/rich_results_repository.dart';
+import '../../core/api_transport.dart';
 import '../../core/attachments.dart';
 import '../../core/audio.dart';
 import '../../core/core.dart';
@@ -43,6 +45,22 @@ final class ChatController extends ChangeNotifier {
   void replyTo(ChatMessageItem message) {
     if (message.isPending || message.isStreaming) return;
     _replyTarget = message;
+    _notify();
+  }
+
+  NodApiTransport? get transport =>
+      _repository is NodApiTransport ? _repository as NodApiTransport : null;
+  bool get canReact => _repository is NodApiTransport;
+
+  Future<void> react(ChatMessageItem message, String? reaction) async {
+    if (!canReact || message.isPending || message.isStreaming) return;
+    try {
+      await NodRichResultsRepository(_repository as NodApiTransport)
+          .react(message.id, reaction);
+      _applyState(await _repository.loadState());
+    } on Object catch (error) {
+      _failure = _failureFrom(error);
+    }
     _notify();
   }
 
@@ -199,8 +217,7 @@ final class ChatController extends ChangeNotifier {
     }
     final target = replyTarget ?? _replyTarget;
     final threadId = _threadId;
-    if (target != null &&
-        (threadId == null || attachments.isNotEmpty || recording != null)) {
+    if (target != null && threadId == null) {
       return false;
     }
     final customAnswer = target?.answerChoices != null && choiceIds == null;
@@ -229,6 +246,7 @@ final class ChatController extends ChangeNotifier {
               'Voice message',
             ].where((value) => value.isNotEmpty).join('\n'),
       attachments: attachments,
+      replyToMessageId: target?.id,
       createdAt: DateTime.now(),
       isPending: true,
     );
@@ -253,6 +271,8 @@ final class ChatController extends ChangeNotifier {
           replyToMessageId: target.id,
           choiceIds: choiceIds,
           customAnswer: customAnswer,
+          attachments: attachments,
+          recording: recording,
         );
         _pendingChoices.remove(target.id);
         if (_replyTarget?.id == target.id) _replyTarget = null;
@@ -295,6 +315,10 @@ final class ChatController extends ChangeNotifier {
           )) {
             _retrySignature = null;
             _retryClientId = null;
+            if (target != null) {
+              _pendingChoices.remove(target.id);
+              if (_replyTarget?.id == target.id) _replyTarget = null;
+            }
             return true;
           }
         } catch (_) {}

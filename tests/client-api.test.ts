@@ -63,6 +63,19 @@ test('Flutter client fixtures match the shared server contract', async () => {
   assert.deepEqual(clientStopResponseSchema.parse({ ok: true }), { ok: true });
 });
 
+test('native rich result payloads survive state serialization with safety-critical details', async () => {
+  const state = clientStateSchema.parse(await fixture('state.json'));
+  const visuals = (await fixture('rich-results.json')) as unknown[];
+  const parsed = clientStateSchema.parse({
+    ...state,
+    messages: visuals.map((presentation) => ({ ...state.messages[1], presentation })),
+  });
+  assert.deepEqual(
+    parsed.messages.map((message) => message.presentation),
+    visuals,
+  );
+});
+
 test('native question state and addressed replies preserve the server contract', async () => {
   const state = clientStateSchema.parse(await fixture('state.json'));
   const message = state.messages[1]!;

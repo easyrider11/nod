@@ -8,11 +8,20 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 
+import '../../api/connections_management_repository.dart';
+import '../../core/api_transport.dart';
+import '../../core/app_connections.dart';
 import '../../core/attachments.dart';
 import '../../core/audio.dart';
 import '../../core/core.dart';
+import '../../core/private_requests.dart';
 import '../../design_system/design_system.dart';
 import '../../motion/motion.dart';
+import '../apps/apps_page.dart';
+import '../connections/connection_setup_page.dart';
+import '../private_requests/private_requests_page.dart';
+import '../results/artifact_preview.dart';
+import '../results/rich_result.dart';
 import 'agent_message_body.dart';
 import 'attachment_draft.dart';
 import 'attachment_view.dart';
@@ -753,7 +762,8 @@ class _Conversation extends StatelessWidget {
           (message) =>
               message.role != NodMessageRole.assistant ||
               message.text.trim().isNotEmpty ||
-              message.attachments.isNotEmpty,
+              message.attachments.isNotEmpty ||
+              message.presentation != null,
         )
         .toList();
     final working =
@@ -796,6 +806,7 @@ class _Conversation extends StatelessWidget {
                     (controller.turn == NodTurnState.queued ||
                         controller.turn == NodTurnState.running),
                 attachmentsRepository: attachmentsRepository,
+                transport: controller.transport,
               ),
               if (message.replyToMessageId != null)
                 Padding(
@@ -813,17 +824,45 @@ class _Conversation extends StatelessWidget {
                   message: message,
                   controller: controller,
                 ),
-              if (message.role == NodMessageRole.assistant &&
-                  !message.isStreaming)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: controller.canCompose
-                        ? () => controller.replyTo(message)
-                        : null,
-                    icon: const Icon(Icons.reply, size: 16),
-                    label: const Text('Reply'),
-                  ),
+              if (!message.isPending && !message.isStreaming)
+                Wrap(
+                  children: [
+                    TextButton.icon(
+                      onPressed: controller.canCompose
+                          ? () => controller.replyTo(message)
+                          : null,
+                      icon: const Icon(Icons.reply, size: 16),
+                      label: const Text('Reply'),
+                    ),
+                    IconButton(
+                      tooltip: 'Copy message',
+                      icon: const Icon(Icons.copy, size: 16),
+                      onPressed: () =>
+                          Clipboard.setData(ClipboardData(text: message.text)),
+                    ),
+                    for (final reaction in message.reactions)
+                      ActionChip(
+                        label: Text(reaction.reaction),
+                        onPressed:
+                            reaction.actor == 'user' && controller.canReact
+                            ? () => controller.react(message, null)
+                            : null,
+                      ),
+                    if (message.role == NodMessageRole.assistant &&
+                        controller.canReact)
+                      PopupMenuButton<String>(
+                        tooltip: 'React',
+                        icon: const Icon(Icons.add_reaction_outlined, size: 18),
+                        onSelected: (value) => controller.react(
+                          message,
+                          value == message.reaction ? null : value,
+                        ),
+                        itemBuilder: (_) => [
+                          for (final emoji in ['👍', '❤️', '🎉', '👀', '👎'])
+                            PopupMenuItem(value: emoji, child: Text(emoji)),
+                        ],
+                      ),
+                  ],
                 ),
             ],
           ),
@@ -949,10 +988,12 @@ class _MessageBubble extends StatelessWidget {
     required this.streaming,
     this.flightTargetKey,
     this.attachmentsRepository,
+    this.transport,
     super.key,
   });
 
   final bool active;
+  final NodApiTransport? transport;
   final NodAttachmentsRepository? attachmentsRepository;
 
   final ChatMessageItem message;
@@ -1085,7 +1126,82 @@ class _MessageBubble extends StatelessWidget {
                         text: message.text,
                         streaming: streaming,
                         active: active,
+                        onArtifactLink: (href, label) {
+                          final proposal = RegExp(
+                            r'^/apps\?connect=([a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12})$',
+                          ).firstMatch(href);
+                          if (proposal != null && transport != null) {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => NodConnectionSetupPage(
+                                  repository:
+                                      NodConnectionsManagementRepository(
+                                        transport!,
+                                      ),
+                                  name: label,
+                                  discoveryId: proposal[1],
+                                ),
+                              ),
+                            );
+                            return true;
+                          }
+                          final ref = NodPrivateRequestRef.fromLink(href);
+                          if (ref != null && transport != null) {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => NodPrivateRequestsPage(
+                                  transport: transport!,
+                                  initialRequest: ref,
+                                ),
+                              ),
+                            );
+                            return true;
+                          }
+                          final uri = Uri.tryParse(href);
+                          if (uri == null ||
+                              uri.hasScheme ||
+                              uri.hasAuthority) {
+                            return false;
+                          }
+                          final artifact = message.attachments
+                              .where(
+                                (item) =>
+                                    uri.path == '/api/artifacts/${item.id}',
+                              )
+                              .firstOrNull;
+                          if (artifact == null ||
+                              attachmentsRepository == null) {
+                            return false;
+                          }
+                          showDialog<void>(
+                            context: context,
+                            builder: (_) => NodArtifactPreview(
+                              artifact: artifact,
+                              repository: attachmentsRepository!,
+                            ),
+                          );
+                          return true;
+                        },
                         key: ValueKey('message-text-${message.id}'),
+                      ),
+                    if (message.presentation != null)
+                      NodRichResult(
+                        result: message.presentation!,
+                        artifacts: message.attachments,
+                        repository: attachmentsRepository,
+                        onOpenApps: transport is NodAppsRepository
+                            ? () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => Scaffold(
+                                    appBar: AppBar(title: const Text('Apps')),
+                                    body: NodAppsPage(
+                                      repository:
+                                          transport! as NodAppsRepository,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : null,
                       ),
                     attachments,
                   ],
@@ -1101,7 +1217,8 @@ class _MessageBubble extends StatelessWidget {
           ? _messageLabel(message)
           : (isOwner ? 'You' : 'Nod'),
       liveRegion: message.isStreaming,
-      excludeSemantics: message.attachments.isEmpty,
+      excludeSemantics:
+          message.attachments.isEmpty && message.presentation == null,
       child: content,
     );
   }
