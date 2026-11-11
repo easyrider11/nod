@@ -27,6 +27,7 @@ final class HttpNodRepository
         NodMessageFocusRepository,
         NodPrivateBrowserTransport,
         NodApiTransport,
+        NodPairedOrigin,
         NodBinaryTransport,
         NodConnectionScope,
         NodAppsRepository,
@@ -97,6 +98,8 @@ final class HttpNodRepository
 
   NodCapabilities? get capabilities => _capabilities;
   NodSession? get session => _session;
+  @override
+  Uri? get pairedOrigin => _config?.origin;
   bool _attachmentsSupported = true;
   @override
   bool get attachmentsSupported => _attachmentsSupported;

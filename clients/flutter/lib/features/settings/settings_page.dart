@@ -17,13 +17,26 @@ class NodSettingsPage extends StatelessWidget {
     required this.transport,
     this.onThemeChanged,
     this.onShowMessage,
+    this.initialSection,
   });
+  final String? initialSection;
   final NodApiTransport transport;
   final ValueChanged<ThemeMode>? onThemeChanged;
   final ValueChanged<String>? onShowMessage;
   @override
   Widget build(BuildContext context) {
     final repository = NodSettingsRepository(transport);
+    final section = switch (initialSection) {
+      'models' => NodModelSettingsPage(repository: repository),
+      'voice' => NodVoiceSettingsPage(repository: repository),
+      'memory' => NodMemorySettingsPage(
+        repository: repository,
+        onShowMessage: onShowMessage,
+      ),
+      'privacy' => _privacy(repository),
+      _ => null,
+    };
+    if (section != null) return section;
     void open(Widget page) =>
         Navigator.push(context, MaterialPageRoute<void>(builder: (_) => page));
     return Scaffold(

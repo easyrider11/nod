@@ -6,6 +6,9 @@ import '../api/api.dart';
 import '../core/api_transport.dart';
 import '../core/app_connections.dart';
 import '../core/core.dart';
+import '../core/mobile_links.dart';
+import '../core/onboarding.dart';
+import '../core/private_requests.dart';
 import '../core/schedules.dart';
 import '../core/usage.dart';
 import '../design_system/design_system.dart';
@@ -30,12 +33,14 @@ class NodClientApp extends StatefulWidget {
     this.restoreConnection,
     this.disposeRepository = true,
     this.themeMode = ThemeMode.system,
+    this.linkSource,
   });
 
   final NodRepository? repository;
   final Future<bool> Function()? restoreConnection;
   final bool disposeRepository;
   final ThemeMode themeMode;
+  final NodMobileLinkSource? linkSource;
 
   @override
   State<NodClientApp> createState() => _NodClientAppState();
@@ -52,11 +57,22 @@ class _NodClientAppState extends State<NodClientApp> {
   ThemeMode? _accountTheme;
   var _themeEpoch = 0;
   String? _connectionError;
+  NodMobileLinkSource? _links;
+  StreamSubscription<Uri>? _linkSubscription;
+  Future<Uri?>? _initialLink;
+  String? _lastLink;
+  DateTime? _lastLinkAt;
 
   @override
   void initState() {
     super.initState();
     _repository = widget.repository ?? HttpNodRepository();
+    _links =
+        widget.linkSource ??
+        (_repository is HttpNodRepository
+            ? NodPlatformMobileLinkSource()
+            : null);
+    _initialLink = _primeLinks();
     unawaited(_restore());
   }
 
@@ -73,6 +89,7 @@ class _NodClientAppState extends State<NodClientApp> {
         _connected = restored;
         _restoring = false;
       });
+      if (restored && !_needsOnboarding) unawaited(_restoreInitialLink());
     } on NodException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -137,10 +154,127 @@ class _NodClientAppState extends State<NodClientApp> {
     }
   }
 
+  Future<Uri?> _primeLinks() async {
+    final source = _links;
+    if (source == null) return null;
+    Uri? initial;
+    try {
+      initial = await source.initialUri().timeout(const Duration(seconds: 3));
+    } on Object {
+      initial = null;
+    }
+    if (!mounted) return null;
+    var startupReplayPending = initial != null;
+    _linkSubscription = source.uris.listen((uri) {
+      if (startupReplayPending && uri == initial) {
+        startupReplayPending = false;
+        return;
+      }
+      _openLink(uri);
+    }, onError: (Object _) {});
+    return initial;
+  }
+
+  Future<void> _restoreInitialLink() async {
+    final epoch = _themeEpoch;
+    try {
+      final uri = await _initialLink;
+      if (uri != null && mounted && epoch == _themeEpoch) _openLink(uri);
+    } on Object {
+      return;
+    }
+  }
+
+  void _showMessage(String id) {
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    setState(() {
+      _focusMessageId = id;
+      _selectedIndex = 0;
+    });
+  }
+
+  void _openLink(Uri uri) {
+    if (!mounted || !_connected || _restoring || _needsOnboarding) return;
+    final repository = _repository;
+    if (repository is! NodApiTransport || repository is! NodPairedOrigin) {
+      return;
+    }
+    final origin = (repository as NodPairedOrigin).pairedOrigin;
+    if (origin == null) return;
+    final route = NodMobileRoute.parse(
+      uri.toString(),
+      pairedOrigin: origin,
+      authenticated: true,
+    );
+    if (route == null) return;
+    final now = DateTime.now();
+    if (_lastLink == uri.toString() &&
+        _lastLinkAt != null &&
+        now.difference(_lastLinkAt!) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastLink = uri.toString();
+    _lastLinkAt = now;
+    final transport = repository as NodApiTransport;
+    final index = switch (route.destination) {
+      NodMobileDestination.chat => 0,
+      NodMobileDestination.apps => 2,
+      NodMobileDestination.usage => 3,
+      NodMobileDestination.tasks => 4,
+      NodMobileDestination.settings => 7,
+      NodMobileDestination.vault => 8,
+      NodMobileDestination.notifications => 9,
+      _ => null,
+    };
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    if (index != null) {
+      setState(() {
+        _focusMessageId = null;
+        _selectedIndex = index;
+      });
+      return;
+    }
+    final page = switch (route.destination) {
+      NodMobileDestination.prepared => Scaffold(
+        appBar: AppBar(title: const Text('Prepared work')),
+        body: NodPreparedPage(transport: transport, issueId: route.id),
+      ),
+      NodMobileDestination.credentials ||
+      NodMobileDestination.payment => NodPrivateRequestsPage(
+        transport: transport,
+        initialRequest: NodPrivateRequestRef.fromLink(uri.path),
+      ),
+      NodMobileDestination.browser => NodPrivateRequestsPage(
+        transport: transport,
+      ),
+      NodMobileDestination.channels => NodConnectionsPage(transport: transport),
+      NodMobileDestination.models ||
+      NodMobileDestination.voice ||
+      NodMobileDestination.memory ||
+      NodMobileDestination.privacy => NodSettingsPage(
+        transport: transport,
+        initialSection: route.destination.name,
+        onShowMessage: _showMessage,
+        onThemeChanged: (value) {
+          ++_themeEpoch;
+          setState(() => _accountTheme = value);
+        },
+      ),
+      _ => null,
+    };
+    if (page != null) {
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute<void>(builder: (_) => page),
+      );
+    }
+  }
+
   Future<void> _logOut() async {
     _navigatorKey.currentState?.popUntil((route) => route.isFirst);
     ++_themeEpoch;
     setState(() => _connected = false);
+    _lastLink = null;
+    _lastLinkAt = null;
     if (_repository case final HttpNodRepository repository) {
       await repository.forgetCredentials();
     }
@@ -156,6 +290,7 @@ class _NodClientAppState extends State<NodClientApp> {
 
   @override
   void dispose() {
+    unawaited(_linkSubscription?.cancel());
     if (widget.disposeRepository && _repository is HttpNodRepository) {
       unawaited(_repository.dispose());
     } else if (widget.disposeRepository) {
@@ -190,12 +325,7 @@ class _NodClientAppState extends State<NodClientApp> {
                   ++_themeEpoch;
                   setState(() => _accountTheme = value);
                 },
-                onShowMessage: (id) {
-                  setState(() {
-                    _focusMessageId = id;
-                    _selectedIndex = 0;
-                  });
-                },
+                onShowMessage: _showMessage,
                 onDestinationSelected: (index) {
                   setState(() {
                     _selectedIndex = index;
@@ -560,6 +690,7 @@ class _ConnectedShell extends StatelessWidget {
               ? NodSettingsPage(
                   transport: transport,
                   onThemeChanged: onThemeChanged,
+                  onShowMessage: showMessage,
                 )
               : selectedIndex == 8 && transport != null
               ? NodVaultPage(transport: transport)

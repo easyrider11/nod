@@ -16,6 +16,10 @@ abstract interface class NodBinaryTransport {
   });
 }
 
+abstract interface class NodPairedOrigin {
+  Uri? get pairedOrigin;
+}
+
 abstract interface class NodApiTransport {
   Future<Object?> requestJson(
     String method,

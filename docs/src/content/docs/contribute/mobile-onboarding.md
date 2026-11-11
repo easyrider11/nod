@@ -9,7 +9,7 @@ Pairing still uses **Server address**, **Access token**, and **Connect to Nod**.
 
 ## Set up the paired server
 
-The setup entry is `NodMobileOnboarding`. The app shell must open it after authentication when `/api/session` reports `settings.onboardingCompleted: false`. An already configured server should open chat. This package supplies the screens and route parser; the shared app shell owns their navigation wiring.
+After pairing, the app reads the authenticated session. A server with unfinished onboarding opens setup before chat. An already configured server opens chat. Finishing setup refreshes the session before entering the conversation.
 
 1. Review **Share usage data** and select **Get started**. Nod starts preparing its workspace and browser on the paired server. Reading connected apps in the background uses your model and counts as model usage.
 2. Select **Connect apps** to connect Gmail, Outlook, or another app through the existing account manager. You can skip this step.
@@ -26,7 +26,7 @@ Returning from an app or model sign-in refreshes server state. Foregrounding ref
 
 ## Change preparation and quiet hours
 
-`NodNotificationSettingsPage` exposes existing server preferences:
+Open **Notifications** from the menu to change existing server preferences:
 
 - **Pause preparation** stops background preparation, Gmail inbox polling, and planned checks of tasks Nod started. Your own tasks and schedules keep running.
 - **Quiet hours**, **From**, and **Until** use the server preference time zone, not the phone clock. Enter 24-hour `HH:mm` times. Equal times mean no quiet interval. An empty time zone uses the server fallback, UTC.
@@ -46,13 +46,13 @@ The parser rejects other origins, embedded credentials, queries, fragments, enco
 
 `NodMobileLinkSource` supplies an `initialUri()` and a `uris` stream. `NodPlatformMobileLinkSource` uses `app_links` to receive platform events. It checks the raw text before parsing, so URI normalization cannot hide traversal or encoded paths. It does not authenticate, queue a destination, navigate, or submit anything. The shared shell owns those decisions and handles stream errors and cancellation.
 
-Only subscribe for dispatch with a current authenticated pairing. Route the startup URI only after restoring the same stored pairing. Drop a startup link when the app launched unpaired, and never defer it until a new pairing succeeds. Cancel dispatch on disconnect and discard any pending destination when the owner or origin changes. Finishing onboarding should open chat, rather than follow a deferred link.
+The app dispatches links only with a current authenticated pairing. A startup URI opens only after restoring the same stored pairing. Launching unpaired drops that destination instead of deferring it to a new pairing. Disconnect stops dispatch and closes private routes. Finishing onboarding opens chat, not a deferred link.
 
-The plugin can replay its startup URI as the first stream event. Calling `initialUri()` does not consume that replay. The shell must suppress startup replay when it was dropped, and deduplicate it when it was already routed. The source itself has no owner identity and cannot make that decision.
+The plugin can replay its startup URI as the first stream event. The shell reads it before subscribing, suppresses that first replay even after a new pairing, and deduplicates adjacent repeated delivery. The source itself has no owner identity and makes no authorization decision.
 
 The iOS URL scheme registration accepts `nod`; its parser enforces the `open` host and exact path. Android registers only the `nod` scheme and `open` host. Flutter's built-in deep-link routing is disabled on both platforms so the plugin, rather than a second router, receives these links. This is custom-scheme registration, not iOS Universal Links or verified Android HTTPS App Links. Other apps can claim a custom scheme too, so links never carry pairing credentials.
 
-Registration and the synthetic bridge checks do not prove cold-start, foreground, or background URL delivery on a device. Native runtime checks and shared-shell dispatch validation remain central integration gates.
+Synthetic bridge and shell checks verify exact routing, authentication, startup replay, and logout fencing. They do not prove cold-start, foreground, or background URL delivery from the operating system. Device URL delivery remains a separate runtime gate.
 
 :::caution[Remote push is blocked]
 There is no APNs or FCM device registration or delivery infrastructure in this client. Push needs an owner-approved architecture and credentials decision, followed by platform permission, delivery, and device checks. No permission toggle pretends that this exists.

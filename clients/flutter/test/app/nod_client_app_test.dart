@@ -7,11 +7,104 @@ import 'package:nod_client/app/nod_client_app.dart';
 import 'package:nod_client/core/api_transport.dart';
 import 'package:nod_client/core/app_connections.dart';
 import 'package:nod_client/core/core.dart';
+import 'package:nod_client/core/mobile_links.dart';
 import 'package:nod_client/features/apps/apps_page.dart';
 import 'package:nod_client/features/chat/chat_testing.dart';
 import 'package:nod_client/features/onboarding/onboarding_page.dart';
+import 'package:nod_client/features/prepared/prepared_page.dart';
 
 void main() {
+  testWidgets(
+    'restored links are authenticated, exact, deduplicated and dropped after logout',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _TransportFixture();
+      addTearDown(repository.chat.dispose);
+      const id = 'c5ed5115-813d-4d3d-a6ce-94b6d36ce004';
+      final links = _LinkFixture(Uri.parse('nod://open/prepared/$id'));
+      addTearDown(links.controller.close);
+      final restore = Completer<bool>();
+      await tester.pumpWidget(
+        NodClientApp(
+          repository: repository,
+          linkSource: links,
+          restoreConnection: () => restore.future,
+          disposeRepository: false,
+        ),
+      );
+      links.controller.add(Uri.parse('nod://open/vault'));
+      await tester.pump();
+      expect(repository.paths, isEmpty);
+      restore.complete(true);
+      await tester.pumpAndSettle();
+      expect(find.byType(NodPreparedPage), findsOneWidget);
+      expect(
+        repository.paths.where((path) => path == '/api/prepared/$id').length,
+        1,
+      );
+      links.controller.add(Uri.parse('nod://open/prepared/$id'));
+      links.controller.add(Uri.parse('https://foreign.example/prepared/$id'));
+      await tester.pumpAndSettle();
+      expect(
+        repository.paths.where((path) => path == '/api/prepared/$id').length,
+        1,
+      );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Open menu'));
+      await tester.pumpAndSettle();
+      final logout = find.byKey(const Key('log-out'));
+      await tester.ensureVisible(logout);
+      await tester.tap(logout);
+      await tester.pumpAndSettle();
+      links.controller.add(Uri.parse('nod://open/prepared/$id'));
+      await tester.pumpAndSettle();
+      expect(find.byType(NodPreparedPage), findsNothing);
+      expect(find.byKey(const Key('connection-origin')), findsOneWidget);
+      expect(
+        repository.paths.where((path) => path == '/api/prepared/$id').length,
+        1,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('new pairing does not consume an unpaired startup link', (
+    tester,
+  ) async {
+    final repository = _TransportFixture();
+    addTearDown(repository.chat.dispose);
+    final links = _LinkFixture(Uri.parse('nod://open/tasks'));
+    addTearDown(links.controller.close);
+    await tester.pumpWidget(
+      NodClientApp(
+        repository: repository,
+        linkSource: links,
+        restoreConnection: () async => false,
+        disposeRepository: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    links.controller.add(Uri.parse('nod://open/vault'));
+    await tester.enterText(
+      find.byKey(const Key('connection-origin')),
+      'https://nod.example.test',
+    );
+    await tester.enterText(
+      find.byKey(const Key('connection-token')),
+      'synthetic-pairing-token',
+    );
+    await tester.tap(find.byKey(const Key('connection-submit')));
+    await tester.pumpAndSettle();
+    links.controller.add(Uri.parse('nod://open/tasks'));
+    await tester.pumpAndSettle();
+    expect(links.initialCalls, 1);
+    expect(repository.paths, isNot(contains('/api/tasks')));
+    expect(find.byKey(const Key('chat-composer')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('unconfigured paired servers enter onboarding before chat', (
     tester,
   ) async {
@@ -345,9 +438,27 @@ void main() {
   );
 }
 
-class _TransportFixture implements NodRepository, NodApiTransport {
+class _LinkFixture implements NodMobileLinkSource {
+  _LinkFixture(this.initial);
+  final Uri initial;
+  final controller = StreamController<Uri>.broadcast();
+  var initialCalls = 0;
+  @override
+  Future<Uri?> initialUri() async {
+    ++initialCalls;
+    return initial;
+  }
+
+  @override
+  Stream<Uri> get uris => controller.stream;
+}
+
+class _TransportFixture
+    implements NodRepository, NodApiTransport, NodPairedOrigin {
   _TransportFixture({this.completed = true});
   final bool completed;
+  @override
+  Uri get pairedOrigin => Uri.parse('https://nod.example.test');
   final chat = FakeNodRepository();
   final paths = <String>[];
 

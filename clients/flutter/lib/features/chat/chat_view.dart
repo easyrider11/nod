@@ -1174,9 +1174,14 @@ class _MessageBubble extends StatelessWidget {
                           if (preparedId != null && transport != null) {
                             Navigator.of(context).push(
                               MaterialPageRoute<void>(
-                                builder: (_) => NodPreparedPage(
-                                  transport: transport!,
-                                  issueId: preparedId,
+                                builder: (_) => Scaffold(
+                                  appBar: AppBar(
+                                    title: const Text('Prepared work'),
+                                  ),
+                                  body: NodPreparedPage(
+                                    transport: transport!,
+                                    issueId: preparedId,
+                                  ),
                                 ),
                               ),
                             );
