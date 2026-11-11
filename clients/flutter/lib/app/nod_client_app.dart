@@ -12,6 +12,8 @@ import '../design_system/design_system.dart';
 import '../features/apps/apps_page.dart';
 import '../features/chat/chat.dart';
 import '../features/connections/connections_page.dart';
+import '../features/onboarding/notification_settings_page.dart';
+import '../features/onboarding/onboarding_page.dart';
 import '../features/prepared/prepared_page.dart';
 import '../features/private_requests/private_requests_page.dart';
 import '../features/scheduled/scheduled_page.dart';
@@ -44,6 +46,7 @@ class _NodClientAppState extends State<NodClientApp> {
   final _navigatorKey = GlobalKey<NavigatorState>();
   var _restoring = true;
   var _connected = false;
+  var _needsOnboarding = false;
   var _selectedIndex = 0;
   String? _focusMessageId;
   ThemeMode? _accountTheme;
@@ -64,12 +67,12 @@ class _NodClientAppState extends State<NodClientApp> {
           : _repository is HttpNodRepository
           ? await _repository.connectStored()
           : false;
+      if (restored) await _loadSession();
       if (!mounted) return;
       setState(() {
         _connected = restored;
         _restoring = false;
       });
-      if (restored) unawaited(_loadTheme());
     } on NodException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -85,12 +88,12 @@ class _NodClientAppState extends State<NodClientApp> {
     setState(() => _connectionError = null);
     try {
       await _repository.connect(config);
+      await _loadSession();
       if (!mounted) return;
       setState(() {
         _connected = true;
         _selectedIndex = 0;
       });
-      unawaited(_loadTheme());
     } on NodException catch (error) {
       if (!mounted) return;
       setState(() => _connectionError = error.message);
@@ -98,34 +101,46 @@ class _NodClientAppState extends State<NodClientApp> {
     }
   }
 
-  Future<void> _loadTheme() async {
+  Future<void> _loadSession() async {
     final epoch = ++_themeEpoch;
     final repository = _repository;
     if (repository is! NodApiTransport) return;
+    final value = await (repository as NodApiTransport).requestJson(
+      'GET',
+      '/api/session',
+    );
+    final settings = value is Map ? value['settings'] : null;
+    if (!mounted || epoch != _themeEpoch) return;
+    if (settings is! Map || settings['onboardingCompleted'] is! bool) {
+      throw const NodProtocolException();
+    }
+    _needsOnboarding = settings['onboardingCompleted'] == false;
+    _accountTheme = switch (settings['theme']) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+  }
+
+  Future<void> _completeOnboarding() async {
+    setState(() => _restoring = true);
     try {
-      final value = await (repository as NodApiTransport).requestJson(
-        'GET',
-        '/api/session',
-      );
-      final settings = value is Map ? value['settings'] : null;
-      if (!mounted || !_connected || epoch != _themeEpoch || settings is! Map) {
-        return;
-      }
-      setState(
-        () => _accountTheme = switch (settings['theme']) {
-          'light' => ThemeMode.light,
-          'dark' => ThemeMode.dark,
-          _ => ThemeMode.system,
-        },
-      );
-    } on Object {
-      return;
+      await _loadSession();
+      if (mounted) setState(() => _restoring = false);
+    } on NodException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _connected = false;
+        _restoring = false;
+        _connectionError = error.message;
+      });
     }
   }
 
   Future<void> _logOut() async {
     _navigatorKey.currentState?.popUntil((route) => route.isFirst);
     ++_themeEpoch;
+    setState(() => _connected = false);
     if (_repository case final HttpNodRepository repository) {
       await repository.forgetCredentials();
     }
@@ -161,6 +176,11 @@ class _NodClientAppState extends State<NodClientApp> {
       home: NodMotionLifecycle(
         child: _restoring
             ? const _RestoringConnection()
+            : _connected && _needsOnboarding && _repository is NodApiTransport
+            ? NodMobileOnboarding(
+                transport: _repository as NodApiTransport,
+                onComplete: () => unawaited(_completeOnboarding()),
+              )
             : _connected
             ? _ConnectedShell(
                 repository: _repository,
@@ -453,6 +473,11 @@ class _ConnectedShell extends StatelessWidget {
           icon: Icons.shield_outlined,
           selectedIcon: Icons.shield,
         ),
+        const NodNavigationDestination(
+          label: 'Notifications',
+          icon: Icons.notifications_outlined,
+          selectedIcon: Icons.notifications,
+        ),
       ],
     ];
     void showMessage(String id) {
@@ -538,6 +563,8 @@ class _ConnectedShell extends StatelessWidget {
                 )
               : selectedIndex == 8 && transport != null
               ? NodVaultPage(transport: transport)
+              : selectedIndex == 9 && transport != null
+              ? NodNotificationSettingsPage(transport: transport)
               : _SectionPlaceholder(destination: destinations[selectedIndex]),
         ],
       ),

@@ -65,11 +65,11 @@ During a reply, waves and a spinning Nod mark show that work is in progress, wit
    pnpm run dev
    ```
 
-   Open `http://127.0.0.1:4310`, enter your private token, and finish onboarding before connecting the client. Model and connected-app requests can incur costs and change real accounts; only connect your own test services when you choose to try live behavior.
+   You can pair the mobile client before completing setup in the web app. An unconfigured server opens [mobile onboarding](/contribute/mobile-onboarding/), including optional profile questions, private model configuration, and consent. A configured server opens chat. Model and connected-app requests can incur costs and change real accounts; only connect your own test services when you choose to try live behavior.
 
 </Steps>
 
-Keep the server terminal open. If port 4310 is already used, choose a free `PORT`, update `NOD_PUBLIC_URL`, and use that port in the client too. Don't stop or reset another Nod installation to free the port.
+Keep the server terminal open. Pair with the exact origin configured in `NOD_PUBLIC_URL`, including scheme, hostname, and port. Native requests send that origin to satisfy the existing private-account guard. A hostname alias can connect for reads but is refused for account changes; don't bypass that refusal. If port 4310 is already used, choose a free `PORT`, update `NOD_PUBLIC_URL`, and use that port in the client too. Don't stop or reset another Nod installation to free the port.
 
 ## Run on the iOS simulator
 
@@ -119,6 +119,8 @@ Try chat and history, streamed replies, stop and reconnect, attachments, voice r
 [Vault](/contribute/mobile-vault/) manages the server's logins, cards, saved browser sessions, imports, and activity. Leaving the paired connection closes private routes. Mobile doesn't create a second Vault or phone-local password-manager integration.
 
 [Rich results and files](/contribute/mobile-results/) appear in chat. Replies can include files or voice and remain addressed to the original message. Active markup files show literal source, never an active page in Nod. Formats without an in-app viewer use the device share/open flow; this isn't full web preview parity.
+
+**Notifications** changes the existing pause, quiet hours, time zone, and notification rule on the server. It doesn't enable native remote push. APNs/FCM transport, credentials, and physical-device delivery remain separate owner decisions and validation gates.
 
 ## Build and check separately
 

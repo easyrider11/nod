@@ -15,11 +15,13 @@ import '../../core/app_connections.dart';
 import '../../core/attachments.dart';
 import '../../core/audio.dart';
 import '../../core/core.dart';
+import '../../core/prepared.dart';
 import '../../core/private_requests.dart';
 import '../../design_system/design_system.dart';
 import '../../motion/motion.dart';
 import '../apps/apps_page.dart';
 import '../connections/connection_setup_page.dart';
+import '../prepared/prepared_page.dart';
 import '../private_requests/private_browser.dart';
 import '../private_requests/private_requests_page.dart';
 import '../results/artifact_preview.dart';
@@ -1163,6 +1165,18 @@ class _MessageBubble extends StatelessWidget {
                                       ),
                                   name: label,
                                   discoveryId: proposal[1],
+                                ),
+                              ),
+                            );
+                            return true;
+                          }
+                          final preparedId = preparedIdFromLink(href);
+                          if (preparedId != null && transport != null) {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => NodPreparedPage(
+                                  transport: transport!,
+                                  issueId: preparedId,
                                 ),
                               ),
                             );

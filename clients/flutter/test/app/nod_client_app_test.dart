@@ -9,8 +9,29 @@ import 'package:nod_client/core/app_connections.dart';
 import 'package:nod_client/core/core.dart';
 import 'package:nod_client/features/apps/apps_page.dart';
 import 'package:nod_client/features/chat/chat_testing.dart';
+import 'package:nod_client/features/onboarding/onboarding_page.dart';
 
 void main() {
+  testWidgets('unconfigured paired servers enter onboarding before chat', (
+    tester,
+  ) async {
+    final repository = _TransportFixture(completed: false);
+    addTearDown(repository.chat.dispose);
+    await tester.pumpWidget(
+      NodClientApp(
+        repository: repository,
+        restoreConnection: () async => true,
+        disposeRepository: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(NodMobileOnboarding), findsOneWidget);
+    expect(find.byKey(const Key('chat-composer')), findsNothing);
+    expect(repository.paths, contains('/api/models'));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('native navigation reaches paired tasks and private routes', (
     tester,
   ) async {
@@ -325,6 +346,8 @@ void main() {
 }
 
 class _TransportFixture implements NodRepository, NodApiTransport {
+  _TransportFixture({this.completed = true});
+  final bool completed;
   final chat = FakeNodRepository();
   final paths = <String>[];
 
@@ -336,6 +359,20 @@ class _TransportFixture implements NodRepository, NodApiTransport {
   }) async {
     paths.add(path);
     if (method == 'GET' && path == '/api/tasks') return <Object?>[];
+    if (method == 'GET' && path == '/api/session') {
+      return {
+        'user': {'id': 'synthetic-owner'},
+        'settings': {
+          'onboardingCompleted': completed,
+          'theme': 'system',
+          'usageData': false,
+        },
+        'capabilities': {'traces': false},
+      };
+    }
+    if (method == 'GET' && path == '/api/models') {
+      return {'connections': <Object?>[], 'selection': null};
+    }
     if (method == 'GET' && path == '/api/state') {
       return {'messages': <Object?>[], 'turns': <Object?>[]};
     }

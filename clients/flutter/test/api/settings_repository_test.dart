@@ -28,6 +28,7 @@ void main() {
       eventClientFactory: () => events.client,
       client: fixture.RoutingClient((request) async {
         expect(request.url.origin, 'https://nod.example.test');
+        expect(request.headers['Origin'], 'https://nod.example.test');
         expect(
           request.headers['Authorization'],
           'Bearer synthetic-settings-token',

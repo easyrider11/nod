@@ -16,12 +16,62 @@ import 'package:nod_client/features/chat/agent_message_body.dart';
 import 'package:nod_client/features/chat/chat.dart';
 import 'package:nod_client/features/chat/chat_testing.dart';
 import 'package:nod_client/features/connections/connection_setup_page.dart';
+import 'package:nod_client/features/prepared/prepared_page.dart';
 import 'package:nod_client/features/private_requests/private_browser.dart';
 import 'package:nod_client/features/private_requests/private_requests_page.dart';
 import 'package:nod_client/features/results/rich_result.dart';
 import 'package:nod_client/motion/motion.dart';
 
 void main() {
+  testWidgets(
+    'older prepared finding opens exact authenticated result and surfaces refusal',
+    (tester) async {
+      const id = 'c5ed5115-813d-4d3d-a6ce-94b6d36ce004';
+      final backend = FakeNodRepository(
+        state: const NodState(
+          threadId: 'current-thread',
+          messages: [],
+          turn: NodTurnState.idle,
+          revision: '1',
+        ),
+      );
+      addTearDown(backend.dispose);
+      final repository = _PrivateLinkRepository(backend)
+        ..contextMessages = [
+          NodMessage(
+            id: 'older-finding',
+            role: NodMessageRole.assistant,
+            text: '[Prepared finding](/prepared/$id)',
+            createdAt: DateTime(2026),
+          ),
+        ];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: NodTheme.light,
+          home: Scaffold(
+            body: NodChat(
+              repository: repository,
+              focusMessageId: 'older-finding',
+              replyToFocusedMessage: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect((await repository.loadState()).messages, isEmpty);
+      await tester.tap(find.text('Prepared finding', findRichText: true));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<NodPreparedPage>(find.byType(NodPreparedPage)).issueId,
+        id,
+      );
+      expect(repository.reads, contains('/api/prepared/$id'));
+      expect(backend.sentTexts, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   for (final kind in ['credentials', 'payments']) {
     testWidgets(
       'older focused $kind link opens exact private form absent from recent state',

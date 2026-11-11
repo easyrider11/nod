@@ -1201,6 +1201,7 @@ final class HttpNodRepository
   Map<String, String> _headers({bool json = false}) => {
     'Accept': 'application/json',
     'Authorization': 'Bearer ${_config!.token}',
+    'Origin': _config!.origin.origin,
     if (json) 'Content-Type': 'application/json',
   };
 
