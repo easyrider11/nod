@@ -331,6 +331,80 @@ void main() {
     expect(forwarded, 0);
   });
 
+  test('task message focus loads bounded server context, addresses older question and fences reset', () async {
+    final events = EventConnection();
+    var thread = 'thread-1';
+    final contextGate = Completer<void>();
+    final contextStarted = Completer<void>();
+    final writes = <Map<Object?, Object?>>[];
+    final repository = HttpNodRepository(
+      credentials: MemoryCredentials(),
+      eventClientFactory: () => events.client,
+      client: RoutingClient((request) async {
+        expect(request.headers['Authorization'], 'Bearer $token');
+        if (request.url.path == '/api/messages/around/older-question') {
+          expect(request.followRedirects, isFalse);
+          return _jsonResponse(200, [
+            {
+              ..._message('older-question', null, 'Continue this task?'),
+              'role': 'assistant',
+            },
+          ]);
+        }
+        if (request.url.path == '/api/messages/around/delayed-question') {
+          contextStarted.complete();
+          await contextGate.future;
+          return _jsonResponse(200, [
+            {
+              ..._message('delayed-question', null, 'Old private link'),
+              'role': 'assistant',
+            },
+          ]);
+        }
+        if (request.method == 'POST' && request.url.path == '/api/messages') {
+          writes.add(
+            jsonDecode(utf8.decode(await request.finalize().toBytes())) as Map,
+          );
+          return _jsonResponse(200, {'ok': true});
+        }
+        return switch (request.url.path) {
+          '/api/client/capabilities' => _jsonResponse(200, _capabilities()),
+          '/api/session' => _jsonResponse(200, _session()),
+          '/api/state' => _jsonResponse(200, {..._state(), 'threadId': thread}),
+          '/api/messages' => _jsonResponse(200, {'messages': <Object?>[]}),
+          _ => _jsonResponse(404, {'error': 'not found'}),
+        };
+      }),
+    );
+    addTearDown(repository.dispose);
+    await repository.connect(config);
+    final controller = ChatController(repository);
+    addTearDown(controller.dispose);
+    await controller.start();
+    expect(
+      (await controller.focusMessage('older-question'))?.id,
+      'older-question',
+    );
+    expect(controller.replyTarget?.id, 'older-question');
+    expect(await controller.sendText('No, stop this task'), isTrue);
+    expect(writes.single['replyToMessageId'], 'older-question');
+    expect(writes.single['threadId'], 'thread-1');
+    expect(writes.single.containsKey('questionAnswer'), isFalse);
+    final focusing = controller.focusMessage('delayed-question');
+    await contextStarted.future;
+    thread = 'replacement-thread';
+    contextGate.complete();
+    expect(await focusing, isNull);
+    expect(controller.replyTarget, isNull);
+    expect(
+      controller.messages.any((message) => message.id == 'delayed-question'),
+      isFalse,
+    );
+    expect(await controller.focusMessage('missing-question'), isNull);
+    expect(controller.replyTarget, isNull);
+    expect(writes, hasLength(1));
+  });
+
   test('feature transport refuses off-origin and non-API destinations', () {
     final repository = HttpNodRepository(credentials: MemoryCredentials());
     addTearDown(repository.dispose);

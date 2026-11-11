@@ -15,6 +15,12 @@ For approvals, spending check-ins and questions without choices, select **Reply*
 
 Addressed replies currently support typed text. Clear the reply target before sending a voice message or an attachment. Private sign-in, verification and payment forms have a separate entry point supplied by the app shell; never enter passwords or card details in the message box.
 
+## Open a task's question
+
+The shell can pass a task's exact message ID to `NodChat.focusMessageId`. Chat loads that message's surrounding history through the server's owner-scoped message-context route, anchors the conversation at the target and sets up a reply without sending anything. Newer and older messages remain scrollable. Changing the target updates the reply; opening Chat without a target does not select one.
+
+Read-only destinations can set `replyToFocusedMessage: false`. A removed message, a stopped focus request or a conversation reset cannot leave an old message selected as the reply target. If the target is unavailable, Chat says so instead of silently replying to another task. The shell's private-entry controls remain available alongside the target. This focus API does not make relative private-form links in Markdown open an external browser.
+
 ## Stop and reconnect
 
 **Stop** clears local question controls and asks the server to stop active work. It cannot undo an action that already happened. A refresh replaces the list of questions still waiting for answers. Stopped or replaced choice questions no longer offer choices; the server also refuses a late choice or custom answer.

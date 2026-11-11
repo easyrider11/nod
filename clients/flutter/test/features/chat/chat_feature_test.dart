@@ -13,6 +13,55 @@ import 'package:nod_client/features/chat/chat_testing.dart';
 import 'package:nod_client/motion/motion.dart';
 
 void main() {
+  testWidgets(
+    'task message navigation anchors older messages and updates the addressed reply',
+    (tester) async {
+      final messages = List.generate(
+        60,
+        (index) => NodMessage(
+          id: 'message-$index',
+          role: NodMessageRole.assistant,
+          text: 'Task question $index',
+          createdAt: DateTime(2026, 1, 1, 0, index),
+        ),
+      );
+      final repository = FakeNodRepository(
+        state: NodState(
+          threadId: 'thread',
+          messages: messages,
+          turn: NodTurnState.waiting,
+          revision: '1',
+        ),
+      );
+      addTearDown(repository.dispose);
+      await _pumpChat(tester, repository, focusMessageId: 'message-0');
+      final first = tester.getRect(find.byKey(const ValueKey('message-0')));
+      final firstViewport = tester.getRect(
+        find.byKey(const ValueKey('chat-focus-message-0')),
+      );
+      expect(first.top, greaterThanOrEqualTo(firstViewport.top));
+      expect(first.bottom, lessThanOrEqualTo(firstViewport.bottom));
+      expect(find.byTooltip('Cancel reply'), findsOneWidget);
+      await _pumpChat(tester, repository, focusMessageId: 'message-40');
+      final next = tester.getRect(find.byKey(const ValueKey('message-40')));
+      final nextViewport = tester.getRect(
+        find.byKey(const ValueKey('chat-focus-message-40')),
+      );
+      expect(next.top, greaterThanOrEqualTo(nextViewport.top));
+      expect(next.bottom, lessThanOrEqualTo(nextViewport.bottom));
+      expect(
+        find.byKey(const ValueKey('chat-focus-message-40')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('chat-focus-unavailable')), findsNothing);
+      expect(repository.sentTexts, isEmpty);
+      await _pumpChat(tester, repository, focusMessageId: 'missing-message');
+      expect(find.byKey(const Key('chat-focus-unavailable')), findsOneWidget);
+      expect(find.byTooltip('Cancel reply'), findsNothing);
+      expect(repository.sentTexts, isEmpty);
+    },
+  );
+
   test(
     'attachment send retry keeps its client ID and never retries automatically',
     () async {
@@ -1290,6 +1339,7 @@ Future<void> _pumpChat(
   WidgetTester tester,
   FakeNodRepository repository, {
   bool autofocus = false,
+  String? focusMessageId,
   bool disableAnimations = false,
   double textScale = 1,
   bool darkMode = false,
@@ -1316,6 +1366,7 @@ Future<void> _pumpChat(
           child: NodChat(
             repository: repository,
             autofocus: autofocus,
+            focusMessageId: focusMessageId,
             pickAttachments: pickAttachments,
           ),
         ),

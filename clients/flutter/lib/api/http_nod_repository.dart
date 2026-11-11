@@ -23,6 +23,7 @@ final class HttpNodRepository
     implements
         NodRepository,
         NodReplyRepository,
+        NodMessageFocusRepository,
         NodPrivateBrowserTransport,
         NodApiTransport,
         NodAppsRepository,
@@ -253,6 +254,15 @@ final class HttpNodRepository
         if (_threadId != null) 'threadId': _threadId,
       },
     );
+  }
+
+  @override
+  Future<List<NodMessage>> loadMessageContext(String messageId) async {
+    final value = await _requestJson(
+      'GET',
+      '/api/messages/around/${Uri.encodeComponent(messageId)}',
+    );
+    return _deduplicateMessages(_parseMessages(value));
   }
 
   @override

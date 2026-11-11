@@ -30,6 +30,8 @@ class NodChat extends StatefulWidget {
     this.voiceDraft,
     this.pickAttachments,
     this.privateRequestBuilder,
+    this.focusMessageId,
+    this.replyToFocusedMessage = true,
     super.key,
   });
 
@@ -43,6 +45,8 @@ class NodChat extends StatefulWidget {
   final NodRepository repository;
   final bool autofocus;
   final bool active;
+  final String? focusMessageId;
+  final bool replyToFocusedMessage;
   final VoiceDraft? voiceDraft;
 
   @override
@@ -67,6 +71,10 @@ class _NodChatState extends State<NodChat>
   double _flightWidth = 0;
   TextStyle? _flightStyle;
   String _conversationMarker = '';
+  String? _requestedFocusId;
+  String? _focusedMessageId;
+  bool _focusUnavailable = false;
+  int _focusAttempt = 0;
   AttachmentDraft? _draft;
   VoiceDraft? _voice;
   bool _picking = false;
@@ -107,10 +115,59 @@ class _NodChatState extends State<NodChat>
   void didUpdateWidget(NodChat oldWidget) {
     super.didUpdateWidget(oldWidget);
     assert(oldWidget.repository == widget.repository);
+    if (oldWidget.focusMessageId != widget.focusMessageId ||
+        oldWidget.active != widget.active ||
+        oldWidget.replyToFocusedMessage != widget.replyToFocusedMessage) {
+      _focusAttempt++;
+      _controller.cancelMessageFocus();
+      if (oldWidget.focusMessageId != null && widget.focusMessageId == null) {
+        _controller.clearReply();
+      }
+      _requestedFocusId = null;
+      _focusedMessageId = null;
+      _focusUnavailable = false;
+      _requestMessageFocus();
+    }
     if (!widget.active) {
       _cancelSendFlight();
       unawaited(_voice?.suspend());
     }
+  }
+
+  void _requestMessageFocus() {
+    final id = widget.focusMessageId;
+    if (!widget.active ||
+        _controller.isLoading ||
+        id == null ||
+        id == _requestedFocusId) {
+      return;
+    }
+    _requestedFocusId = id;
+    unawaited(_focusMessage(id));
+  }
+
+  Future<void> _focusMessage(String id) async {
+    final attempt = ++_focusAttempt;
+    final target = await _controller.focusMessage(
+      id,
+      reply: widget.replyToFocusedMessage,
+    );
+    if (!mounted ||
+        attempt != _focusAttempt ||
+        widget.focusMessageId != id ||
+        _requestedFocusId != id ||
+        !widget.active) {
+      return;
+    }
+    setState(() {
+      _focusedMessageId = target?.id;
+      _focusUnavailable = target == null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _focusedMessageId == id && _scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
+    });
   }
 
   void _handleControllerChanged() {
@@ -118,6 +175,11 @@ class _NodChatState extends State<NodChat>
       return;
     }
     final messages = _controller.messages;
+    if (_focusedMessageId != null &&
+        !messages.any((message) => message.id == _focusedMessageId)) {
+      _focusedMessageId = null;
+      _focusUnavailable = true;
+    }
     if (_flightId != null &&
         !messages.any(
           (message) => (message.clientMessageId ?? message.id) == _flightId,
@@ -138,7 +200,8 @@ class _NodChatState extends State<NodChat>
     final shouldScroll = marker != _conversationMarker && wasNearBottom;
     _conversationMarker = marker;
     setState(() {});
-    if (shouldScroll) {
+    _requestMessageFocus();
+    if (shouldScroll && widget.focusMessageId == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_scrollController.hasClients) {
           return;
@@ -477,6 +540,7 @@ class _NodChatState extends State<NodChat>
                               ? widget.repository as NodAttachmentsRepository
                               : null,
                           onQuestionSelected: _controller.answer,
+                          focusMessageId: _focusedMessageId,
                           flightId: _flightId,
                           flightTargetKey: _flightTargetKey,
                         ),
@@ -575,6 +639,14 @@ class _NodChatState extends State<NodChat>
                         ],
                       ),
                     ),
+                  if (_focusUnavailable)
+                    const ListTile(
+                      key: Key('chat-focus-unavailable'),
+                      leading: Icon(Icons.info_outline),
+                      title: Text(
+                        'This message is no longer available. Choose a current task message to reply.',
+                      ),
+                    ),
                   if (widget.privateRequestBuilder != null)
                     widget.privateRequestBuilder!(
                       context,
@@ -662,8 +734,10 @@ class _Conversation extends StatelessWidget {
     required this.flightId,
     required this.flightTargetKey,
     this.attachmentsRepository,
+    this.focusMessageId,
   });
 
+  final String? focusMessageId;
   final bool active;
   final ChatController controller;
   final ScrollController scrollController;
@@ -700,6 +774,90 @@ class _Conversation extends StatelessWidget {
             : controller.failure,
       );
     }
+    Widget messageItem(ChatMessageItem message) {
+      return Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _MessageBubble(
+                key: ValueKey(message.id),
+                active: active,
+                message: message,
+                flightTargetKey:
+                    (message.clientMessageId ?? message.id) == flightId
+                    ? flightTargetKey
+                    : null,
+                streaming:
+                    message.isStreaming &&
+                    controller.failure == null &&
+                    controller.question == null &&
+                    (controller.turn == NodTurnState.queued ||
+                        controller.turn == NodTurnState.running),
+                attachmentsRepository: attachmentsRepository,
+              ),
+              if (message.replyToMessageId != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Text(
+                    'Reply to ${controller.messages.where((item) => item.id == message.replyToMessageId).firstOrNull?.text ?? 'earlier message'}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              if (controller.hasChoices(message))
+                _AnswerChoices(
+                  key: ValueKey('choices-${message.id}'),
+                  message: message,
+                  controller: controller,
+                ),
+              if (message.role == NodMessageRole.assistant &&
+                  !message.isStreaming)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: controller.canCompose
+                        ? () => controller.replyTo(message)
+                        : null,
+                    icon: const Icon(Icons.reply, size: 16),
+                    label: const Text('Reply'),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final focusIndex = messages.indexWhere(
+      (message) => message.id == focusMessageId,
+    );
+    if (focusIndex >= 0) {
+      final anchor = ValueKey('focus-anchor-$focusMessageId');
+      return SelectionArea(
+        child: CustomScrollView(
+          key: ValueKey('chat-focus-$focusMessageId'),
+          controller: scrollController,
+          reverse: true,
+          center: anchor,
+          slivers: [
+            SliverList.builder(
+              itemCount: messages.length - focusIndex - 1,
+              itemBuilder: (context, index) =>
+                  messageItem(messages[focusIndex + index + 1]),
+            ),
+            SliverList.builder(
+              key: anchor,
+              itemCount: focusIndex + 1,
+              itemBuilder: (context, index) =>
+                  messageItem(messages[focusIndex - index]),
+            ),
+          ],
+        ),
+      );
+    }
     return SelectionArea(
       child: ListView.builder(
         key: const Key('chat-message-list'),
@@ -721,60 +879,7 @@ class _Conversation extends StatelessWidget {
               index +
               (controller.question == null ? 0 : 1);
           final message = messages[messageIndex];
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _MessageBubble(
-                    key: ValueKey(message.id),
-                    active: active,
-                    message: message,
-                    flightTargetKey:
-                        (message.clientMessageId ?? message.id) == flightId
-                        ? flightTargetKey
-                        : null,
-                    streaming:
-                        message.isStreaming &&
-                        controller.failure == null &&
-                        controller.question == null &&
-                        (controller.turn == NodTurnState.queued ||
-                            controller.turn == NodTurnState.running),
-                    attachmentsRepository: attachmentsRepository,
-                  ),
-                  if (message.replyToMessageId != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        'Reply to ${controller.messages.where((item) => item.id == message.replyToMessageId).firstOrNull?.text ?? 'earlier message'}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                  if (controller.hasChoices(message))
-                    _AnswerChoices(
-                      key: ValueKey('choices-${message.id}'),
-                      message: message,
-                      controller: controller,
-                    ),
-                  if (message.role == NodMessageRole.assistant &&
-                      !message.isStreaming)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: controller.canCompose
-                            ? () => controller.replyTo(message)
-                            : null,
-                        icon: const Icon(Icons.reply, size: 16),
-                        label: const Text('Reply'),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
+          return messageItem(message);
         },
       ),
     );

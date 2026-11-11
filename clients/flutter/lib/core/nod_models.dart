@@ -129,6 +129,10 @@ final class NodVerificationRequest {
   final String kind;
 }
 
+abstract interface class NodMessageFocusRepository {
+  Future<List<NodMessage>> loadMessageContext(String messageId);
+}
+
 abstract interface class NodReplyRepository {
   Future<void> sendReply(
     String text, {

@@ -28,6 +28,8 @@ final class ChatController extends ChangeNotifier {
   NodTurnState _turn = NodTurnState.idle;
   ChatQuestion? _question;
   String? _threadId;
+  int _focusVersion = 0;
+  bool _isFocusing = false;
   ChatMessageItem? _replyTarget;
   final Set<String> _pendingChoices = {};
   List<NodVerificationRequest> _verificationRequests = const [];
@@ -85,7 +87,69 @@ final class ChatController extends ChangeNotifier {
   bool get isSending => _isSending;
   bool get isStopping => _isStopping;
 
-  bool get canCompose => !_isLoading && !_isSending && !_isStopping;
+  bool get canCompose =>
+      !_isLoading && !_isSending && !_isStopping && !_isFocusing;
+
+  Future<ChatMessageItem?> focusMessage(
+    String messageId, {
+    bool reply = true,
+  }) async {
+    final version = ++_focusVersion;
+    final threadId = _threadId;
+    _failure = null;
+    _replyTarget = null;
+    _isFocusing = true;
+    _notify();
+    try {
+      final state = await _repository.loadState();
+      if (_disposed || version != _focusVersion) return null;
+      _applyState(state);
+      if (threadId != null && state.threadId != threadId) return null;
+      final historyVersion = _historyVersion;
+      final repository = _repository;
+      final context = repository is NodMessageFocusRepository
+          ? await (repository as NodMessageFocusRepository).loadMessageContext(
+              messageId,
+            )
+          : <NodMessage>[];
+      if (_disposed || version != _focusVersion) return null;
+      if (repository is NodMessageFocusRepository &&
+          !context.any((message) => message.id == messageId)) {
+        return null;
+      }
+      final current = await _repository.loadState();
+      if (_disposed || version != _focusVersion) return null;
+      _applyState(current);
+      if (state.threadId != current.threadId ||
+          historyVersion != _historyVersion) {
+        return null;
+      }
+      _mergeMessages(context);
+      final target = _messages
+          .where((message) => message.id == messageId)
+          .firstOrNull;
+      if (target == null || target.isStreaming || target.isPending) return null;
+      if (reply && target.role == NodMessageRole.assistant) {
+        _replyTarget = target;
+      }
+      return target;
+    } on Object catch (error) {
+      if (!_disposed && version == _focusVersion) {
+        _failure = _failureFrom(error);
+      }
+      return null;
+    } finally {
+      if (!_disposed && version == _focusVersion) {
+        _isFocusing = false;
+        _notify();
+      }
+    }
+  }
+
+  void cancelMessageFocus() {
+    _focusVersion++;
+    _isFocusing = false;
+  }
 
   bool get canStop =>
       _turn == NodTurnState.queued ||
@@ -280,6 +344,7 @@ final class ChatController extends ChangeNotifier {
     if (!canStop || _isStopping) {
       return;
     }
+    cancelMessageFocus();
     _failure = null;
     _isStopping = true;
     _notify();
