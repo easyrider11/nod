@@ -1708,29 +1708,6 @@ class _Composer extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        FocusTraversalOrder(
-                          order: const NumericFocusOrder(21),
-                          child: IconButton.filled(
-                            key: Key(showStop ? 'chat-stop' : 'chat-send'),
-                            tooltip: showStop ? 'Stop Nod' : 'Send',
-                            onPressed: showStop
-                                ? (isStopping ? null : onStop)
-                                : (canSend ? onSend : null),
-                            icon: busy
-                                ? const SizedBox.square(
-                                    dimension: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : Icon(
-                                    showStop
-                                        ? Icons.stop_rounded
-                                        : Icons.arrow_upward_rounded,
-                                  ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
                         Expanded(
                           child: recording
                               ? InputDecorator(
@@ -1821,6 +1798,29 @@ class _Composer extends StatelessWidget {
                                     ),
                                   ),
                                 ),
+                        ),
+                        const SizedBox(width: 8),
+                        FocusTraversalOrder(
+                          order: const NumericFocusOrder(21),
+                          child: IconButton.filled(
+                            key: Key(showStop ? 'chat-stop' : 'chat-send'),
+                            tooltip: showStop ? 'Stop Nod' : 'Send',
+                            onPressed: showStop
+                                ? (isStopping ? null : onStop)
+                                : (canSend ? onSend : null),
+                            icon: busy
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Icon(
+                                    showStop
+                                        ? Icons.stop_rounded
+                                        : Icons.arrow_upward_rounded,
+                                  ),
+                          ),
                         ),
                       ],
                     ),
