@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:nod_client/api/http_nod_repository.dart';
@@ -27,6 +28,18 @@ Map<String, Object?> _login({String revision = '2026-01-01T00:00:00Z'}) => {
   'hasAuthenticator': true,
 };
 
+Map<String, Object?> _session({
+  String state = 'needs_sign_in',
+  String url = 'https://reports.example.test/weekly',
+}) => {
+  'id': _id,
+  'kind': 'session',
+  'label': 'Synthetic session',
+  'origin': 'https://reports.example.test',
+  'url': url,
+  'state': state,
+};
+
 void main() {
   late HttpNodRepository transport;
   late NodVaultRepository repository;
@@ -37,7 +50,22 @@ void main() {
   )
   route;
   final requests = <({String method, Uri uri, Object? body})>[];
+  final clipboardWrites = <String>[];
+  Completer<void>? clipboardCompletion;
   setUp(() async {
+    clipboardWrites.clear();
+    clipboardCompletion = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            clipboardWrites.add((call.arguments as Map)['text']! as String);
+            await clipboardCompletion?.future;
+          }
+          if (call.method == 'Clipboard.getData') {
+            fail('Vault must not read the clipboard.');
+          }
+          return null;
+        });
     requests.clear();
     route = (request, body) async => _json(404, {'error': 'Not found'});
     transport = HttpNodRepository(
@@ -83,7 +111,11 @@ void main() {
     scoped = _ScopedTransport(transport);
     repository = NodVaultRepository(scoped);
   });
-  tearDown(() async => transport.dispose());
+  tearDown(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null);
+    await transport.dispose();
+  });
 
   test(
     'metadata and details use authenticated owner routes without reveal',
@@ -430,6 +462,355 @@ void main() {
       await tester.pumpAndSettle();
       expect(controller.text, isEmpty);
       expect(requests.length, 1);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  test(
+    'sign-in preflight rejects changed session URL, state, or missing session',
+    () async {
+      final item = NodVaultItem(_session());
+      for (final sessions in [
+        <Object?>[_session(url: 'https://reports.example.test/changed')],
+        <Object?>[_session(state: 'saved')],
+        <Object?>[],
+      ]) {
+        route = (request, body) async => _json(200, sessions);
+        await expectLater(
+          repository.signInAgainRequest(item),
+          throwsStateError,
+        );
+      }
+      expect(
+        requests.every(
+          (request) =>
+              request.method == 'GET' &&
+              request.uri.path == '/api/vault/sessions',
+        ),
+        true,
+      );
+    },
+  );
+
+  testWidgets(
+    'page passes refreshed session metadata to one normal owner request',
+    (tester) async {
+      final calls = <String>[];
+      final sending = Completer<void>();
+      route = (request, body) async {
+        if (request.url.path == '/api/vault') return _json(200, <Object?>[]);
+        if (request.url.path == '/api/vault/sessions') {
+          return _json(200, [_session()]);
+        }
+        return _json(200, {
+          'week': {'signIns': 0, 'payments': 0, 'held': 0},
+          'entries': <Object?>[],
+        });
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NodVaultPage(
+            transport: scoped,
+            onAsk: (text) {
+              calls.add(text);
+              return sending.future;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(calls, isEmpty);
+      await tester.tap(find.text('Synthetic session'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sign in again'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sign in again'));
+      await tester.pumpAndSettle();
+      expect(calls, [
+        'Use browser connection $_id to open https://reports.example.test/weekly. Check whether it works. If the session expired, help me sign in through the secure form and save the session.',
+      ]);
+      sending.completeError(StateError('Synthetic send failure'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sign in again'));
+      await tester.pumpAndSettle();
+      expect(calls.length, 1);
+      expect(requests.every((request) => request.method == 'GET'), true);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  for (final boundary in ['background', 'replacement', 'close']) {
+    testWidgets(
+      'late sign-in preflight after $boundary cannot invoke callback',
+      (tester) async {
+        final pending = Completer<http.StreamedResponse>();
+        final calls = <String>[];
+        route = (request, body) async {
+          if (request.url.path == '/api/vault/sessions') return pending.future;
+          return _json(200, {
+            'week': <String, Object?>{},
+            'entries': <Object?>[],
+          });
+        };
+        await tester.pumpWidget(
+          MaterialApp(
+            home: NodVaultDetails(
+              repository: repository,
+              item: NodVaultItem(_session(state: 'pending')),
+              onAsk: (text) async {
+                calls.add(text);
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Sign in again'));
+        await tester.pumpAndSettle();
+        if (boundary == 'background') {
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.inactive,
+          );
+        }
+        if (boundary == 'replacement') scoped.connectionGeneration++;
+        if (boundary == 'close') await tester.pumpWidget(const SizedBox());
+        pending.complete(_json(200, [_session(state: 'pending')]));
+        await tester.pumpAndSettle();
+        expect(calls, isEmpty);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await tester.pumpAndSettle();
+        expect(calls, isEmpty);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  for (final card in [false, true]) {
+    testWidgets(
+      'explicit ${card ? 'card' : 'login'} Copy uses the audited empty-body reveal contract and private clipboard only',
+      (tester) async {
+        final metadata = card
+            ? <String, Object?>{
+                'id': _id,
+                'kind': 'card',
+                'label': 'Synthetic card',
+                'cardholder': 'Synthetic owner',
+                'brand': 'visa',
+                'last4': '0000',
+                'expiryMonth': 12,
+                'expiryYear': 2030,
+                'updatedAt': '1',
+              }
+            : _login();
+        route = (request, body) async {
+          if (request.url.path == '/api/vault/activity') {
+            return _json(200, {
+              'week': <String, Object?>{},
+              'entries': <Object?>[],
+            });
+          }
+          expect(request.method, 'POST');
+          expect(body, isEmpty);
+          if (request.url.path.endsWith('/details')) {
+            return _json(200, metadata);
+          }
+          expect(
+            request.url.path,
+            '/api/vault/$_id/${card ? 'card-number' : 'password'}',
+          );
+          return _json(200, {
+            card ? 'cardNumber' : 'password': 'synthetic-copy-only',
+          });
+        };
+        await tester.pumpWidget(
+          MaterialApp(
+            home: NodVaultDetails(
+              repository: repository,
+              item: NodVaultItem(metadata),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(clipboardWrites, isEmpty);
+        await tester.tap(
+          find.byTooltip(card ? 'Copy card number' : 'Copy password'),
+        );
+        await tester.pumpAndSettle();
+        expect(clipboardWrites, ['synthetic-copy-only']);
+        expect(find.text('synthetic-copy-only'), findsNothing);
+        expect(
+          requests.where(
+            (request) =>
+                request.uri.path.endsWith(card ? '/card-number' : '/password'),
+          ),
+          hasLength(1),
+        );
+        await tester.tap(
+          find.byTooltip(card ? 'Copy cardholder' : 'Copy username'),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          clipboardWrites.last,
+          card ? 'Synthetic owner' : 'synthetic@example.test',
+        );
+        expect(requests.last.uri.path, '/api/vault/$_id/details');
+        expect(
+          requests.any(
+            (request) =>
+                request.uri.path.contains('chat') ||
+                request.uri.path.contains('message'),
+          ),
+          false,
+        );
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  testWidgets(
+    'stale Copy preflight neither reads the secret nor touches the clipboard',
+    (tester) async {
+      var reads = 0;
+      route = (request, body) async {
+        if (request.url.path == '/api/vault/activity') {
+          return _json(200, {
+            'week': <String, Object?>{},
+            'entries': <Object?>[],
+          });
+        }
+        expect(request.url.path, '/api/vault/$_id/details');
+        return _json(
+          200,
+          _login(revision: ++reads == 1 ? '2026-01-01T00:00:00Z' : 'changed'),
+        );
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NodVaultDetails(
+            repository: repository,
+            item: NodVaultItem(_login()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Copy password'));
+      await tester.pumpAndSettle();
+      expect(clipboardWrites, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  for (final boundary in [
+    'background',
+    'replacement',
+    'disconnect',
+    'close',
+    'covered',
+  ]) {
+    testWidgets(
+      'late Copy response after $boundary cannot write the clipboard',
+      (tester) async {
+        final pending = Completer<http.StreamedResponse>();
+        final navigator = GlobalKey<NavigatorState>();
+        route = (request, body) async {
+          if (request.url.path.endsWith('/password')) return pending.future;
+          if (request.url.path == '/api/vault/activity') {
+            return _json(200, {
+              'week': <String, Object?>{},
+              'entries': <Object?>[],
+            });
+          }
+          return _json(200, _login());
+        };
+        await tester.pumpWidget(
+          MaterialApp(
+            navigatorKey: navigator,
+            home: NodVaultDetails(
+              repository: repository,
+              item: NodVaultItem(_login()),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Copy password'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Copy password'));
+        await tester.pumpAndSettle();
+        expect(
+          requests.where((request) => request.uri.path.endsWith('/password')),
+          hasLength(1),
+        );
+        if (boundary == 'background') {
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.inactive,
+          );
+        }
+        if (boundary == 'replacement') scoped.connectionGeneration++;
+        if (boundary == 'disconnect') {
+          await tester.runAsync(transport.disconnect);
+        }
+        if (boundary == 'close') await tester.pumpWidget(const SizedBox());
+        if (boundary == 'covered') {
+          unawaited(
+            navigator.currentState!.push<void>(
+              MaterialPageRoute(
+                builder: (_) => const Scaffold(body: Text('Other view')),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+        }
+        pending.complete(_json(200, {'password': 'synthetic-discarded'}));
+        await tester.pumpAndSettle();
+        expect(clipboardWrites, isEmpty);
+        expect(find.text('synthetic-discarded'), findsNothing);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await tester.pumpAndSettle();
+        expect(clipboardWrites, isEmpty);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  testWidgets(
+    'late platform clipboard acknowledgement is not reported after background',
+    (tester) async {
+      clipboardCompletion = Completer<void>();
+      route = (request, body) async {
+        if (request.url.path.endsWith('/password')) {
+          return _json(200, {'password': 'synthetic-platform-only'});
+        }
+        if (request.url.path == '/api/vault/activity') {
+          return _json(200, {
+            'week': <String, Object?>{},
+            'entries': <Object?>[],
+          });
+        }
+        return _json(200, _login());
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NodVaultDetails(
+            repository: repository,
+            item: NodVaultItem(_login()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Copy password'));
+      await tester.pumpAndSettle();
+      expect(clipboardWrites, ['synthetic-platform-only']);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      clipboardCompletion!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Password copied.'), findsNothing);
+      expect(clipboardWrites, hasLength(1));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('Password copied.'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );

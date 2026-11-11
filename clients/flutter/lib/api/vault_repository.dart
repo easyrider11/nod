@@ -11,6 +11,8 @@ final class NodVaultRepository {
   final int _generation;
   final Set<String> _busy = {};
 
+  bool get isCurrent => _scope.connectionGeneration == _generation;
+
   Future<Object?> _request(
     String method,
     String path, {
@@ -51,16 +53,25 @@ final class NodVaultRepository {
     return result;
   }
 
-  Future<void> _fresh(NodVaultItem item) async {
+  Future<NodVaultItem> _fresh(NodVaultItem item) async {
     final latest = item.session
         ? (await sessions()).where((value) => value.id == item.id).firstOrNull
         : await details(item);
     if (latest == null ||
         !item.sameTarget(latest) ||
         latest.revision != item.revision ||
-        (item.session && latest.data['state'] != item.data['state'])) {
+        (item.session &&
+            (latest.data['state'] != item.data['state'] ||
+                latest.data['url'] != item.data['url'] ||
+                latest.label != item.label))) {
       throw StateError('This Vault item changed. Reopen it before continuing.');
     }
+    return latest;
+  }
+
+  Future<String> copyIdentity(NodVaultItem item) async {
+    if (item.session) throw StateError('This session has no saved identity.');
+    return (await _fresh(item)).identity;
   }
 
   Future<NodVaultItem> save(
@@ -123,6 +134,16 @@ final class NodVaultRepository {
     } finally {
       _busy.remove(item.id);
     }
+  }
+
+  Future<String> signInAgainRequest(NodVaultItem item) async {
+    if (!item.session ||
+        !['needs_sign_in', 'pending'].contains(item.data['state'])) {
+      throw StateError('This session does not need sign-in.');
+    }
+    await _fresh(item);
+    if (!isCurrent) throw StateError('The Nod connection changed.');
+    return 'Use browser connection ${item.id} to open ${item.data['url']}. Check whether it works. If the session expired, help me sign in through the secure form and save the session.';
   }
 
   Future<String> reveal(NodVaultItem item) async {

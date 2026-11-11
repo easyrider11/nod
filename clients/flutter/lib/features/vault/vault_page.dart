@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../api/vault_repository.dart';
 import '../../core/api_transport.dart';
@@ -8,8 +9,9 @@ import 'vault_form.dart';
 import 'vault_import.dart';
 
 class NodVaultPage extends StatefulWidget {
-  const NodVaultPage({super.key, required this.transport});
+  const NodVaultPage({super.key, required this.transport, this.onAsk});
   final NodApiTransport transport;
+  final Future<void> Function(String text)? onAsk;
 
   @override
   State<NodVaultPage> createState() => _NodVaultPageState();
@@ -116,8 +118,13 @@ class _NodVaultPageState extends State<NodVaultPage> {
                     : ''}',
               ),
               isThreeLine: item.session || item.unreadable,
-              onTap: () =>
-                  _open(NodVaultDetails(repository: _repository, item: item)),
+              onTap: () => _open(
+                NodVaultDetails(
+                  repository: _repository,
+                  item: item,
+                  onAsk: widget.onAsk,
+                ),
+              ),
             ),
           const Divider(),
           NodVaultActivityView(
@@ -135,9 +142,11 @@ class NodVaultDetails extends StatefulWidget {
     super.key,
     required this.repository,
     required this.item,
+    this.onAsk,
   });
   final NodVaultRepository repository;
   final NodVaultItem item;
+  final Future<void> Function(String text)? onAsk;
 
   @override
   State<NodVaultDetails> createState() => _NodVaultDetailsState();
@@ -148,8 +157,10 @@ class _NodVaultDetailsState extends State<NodVaultDetails>
   NodVaultItem? _details;
   String? _secret;
   String? _error;
+  String? _notice;
   bool _busy = false;
   bool _active = true;
+  bool _signInRequested = false;
   int _generation = 0;
 
   @override
@@ -166,6 +177,7 @@ class _NodVaultDetailsState extends State<NodVaultDetails>
       _generation++;
       setState(() {
         _secret = null;
+        _notice = null;
         _busy = false;
       });
     } else {
@@ -204,13 +216,86 @@ class _NodVaultDetailsState extends State<NodVaultDetails>
     });
     try {
       final value = await widget.repository.reveal(_details!);
-      if (mounted && _active && generation == _generation) {
+      if (_current(generation)) {
         setState(() => _secret = value);
       }
     } catch (_) {
       if (mounted && generation == _generation) {
         setState(
           () => _error = 'The saved value could not be shown. Reopen the item before trying again.',
+        );
+      }
+    } finally {
+      if (mounted && generation == _generation) setState(() => _busy = false);
+    }
+  }
+
+  bool _current(int generation) =>
+      mounted &&
+      _active &&
+      generation == _generation &&
+      widget.repository.isCurrent &&
+      ModalRoute.of(context)?.isCurrent != false;
+
+  Future<void> _copy({bool identity = false}) async {
+    final item = _details;
+    if (_busy || !_current(_generation) || item == null) return;
+    final generation = ++_generation;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+      _secret = null;
+    });
+    var value = '';
+    try {
+      value = identity
+          ? await widget.repository.copyIdentity(item)
+          : await widget.repository.reveal(item);
+      if (!_current(generation)) return;
+      final copying = Clipboard.setData(ClipboardData(text: value));
+      value = '';
+      await copying;
+      if (_current(generation)) {
+        setState(
+          () => _notice = identity
+              ? '${item.card ? 'Cardholder' : 'Username'} copied.'
+              : '${item.card ? 'Card number' : 'Password'} copied.',
+        );
+      }
+    } catch (_) {
+      if (_current(generation)) {
+        setState(
+          () => _error =
+              'Could not copy this value. Reopen the item before trying again.',
+        );
+      }
+    } finally {
+      value = '';
+      if (mounted && generation == _generation) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _signInAgain() async {
+    final ask = widget.onAsk;
+    final item = _details;
+    if (_busy || !_active || _signInRequested || ask == null || item == null) {
+      return;
+    }
+    final generation = ++_generation;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final text = await widget.repository.signInAgainRequest(item);
+      if (!_current(generation)) return;
+      _signInRequested = true;
+      await ask(text);
+    } catch (_) {
+      if (_current(generation) && !_signInRequested) {
+        setState(
+          () => _error = 'This session changed or could not be checked. Refresh Vault before trying again.',
         );
       }
     } finally {
@@ -317,6 +402,11 @@ class _NodVaultDetailsState extends State<NodVaultDetails>
               subtitle: Text(
                 item.identity.isEmpty ? 'Not saved' : item.identity,
               ),
+              trailing: IconButton(
+                onPressed: _busy ? null : () => _copy(identity: true),
+                icon: const Icon(Icons.copy),
+                tooltip: item.card ? 'Copy cardholder' : 'Copy username',
+              ),
             ),
             if (item.card)
               ListTile(
@@ -342,6 +432,13 @@ class _NodVaultDetailsState extends State<NodVaultDetails>
                         ? 'Not saved'
                         : '••••••••'),
               ),
+              trailing: item.card || item.data['hasPassword'] != false
+                  ? IconButton(
+                      onPressed: _busy ? null : _copy,
+                      icon: const Icon(Icons.copy),
+                      tooltip: item.card ? 'Copy card number' : 'Copy password',
+                    )
+                  : null,
             ),
             TextButton(
               onPressed: _busy
@@ -361,7 +458,16 @@ class _NodVaultDetailsState extends State<NodVaultDetails>
               title: const Text('Saved session'),
               subtitle: Text(item.sessionState),
             ),
+          if (item.session &&
+              widget.onAsk != null &&
+              ['needs_sign_in', 'pending'].contains(item.data['state']))
+            OutlinedButton(
+              onPressed: _busy || _signInRequested ? null : _signInAgain,
+              child: const Text('Sign in again'),
+            ),
           if (_error != null) Text(_error!),
+          if (_notice != null)
+            Semantics(liveRegion: true, child: Text(_notice!)),
           FilledButton.tonal(
             onPressed: _busy ? null : _remove,
             child: Text(item.session ? 'Sign out' : 'Delete ${item.kind}'),
