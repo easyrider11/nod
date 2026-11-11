@@ -68,7 +68,15 @@ The tokens above are fixed public test values, not credentials. Never substitute
 
 Stop Terminal A with Ctrl-C after the run. Start it again with a fresh directory before every rerun. If you change the port, change both terminals. Never reuse a Dart build directory from another checkout.
 
-Host checks supply an empty incoming-link source because `flutter-tester` has no platform plugins. The native scenario uses the registered platform link plugin. Neither scenario simulates OS-delivered URL events.
+Host checks supply an empty incoming-link source because `flutter-tester` has no platform plugins. The native scenario uses the registered platform link plugin. Its default run does not send operating-system URL events.
+
+For an additional foreground URL-delivery check, add `--dart-define=NOD_SYNTHETIC_LINK_CHECK=true` to the native command. After the integrated workflows, the fixture's control-only `/fixture/parity/inspect` response reports `linkReady: true`. Within ten seconds, send exactly one URL from the host:
+
+```sh
+xcrun simctl openurl 8104BA83-DDBD-494B-95FE-D85292C0A12B nod://open/tasks
+```
+
+The scenario waits for the authenticated synthetic task list and fails if the operating-system event does not reach it. This optional check requires a host watcher or another terminal; it never dispatches an outside action. It covers foreground custom-scheme delivery only, not a cold start, background delivery, physical devices, or verified HTTPS links.
 
 When editing a composer again after unfocusing it, the shared workflow driver taps the field and waits for actual focus before entering text. The pinned Flutter native integration binding can retain its previous editable-state reference after the platform text connection closes. Calling `enterText` alone again can silently send to no current client. The driver then waits for an enabled, stable send control, taps once, and waits for the server dispatch count. It never retries a send to make a test pass.
 

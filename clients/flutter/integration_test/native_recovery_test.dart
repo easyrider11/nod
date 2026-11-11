@@ -174,6 +174,15 @@ void main() {
         expect(find.byKey(const Key('chat-composer')), findsOneWidget);
         expect(tester.takeException(), isNull);
         await runParityWorkflows(tester, repository, origin, controlToken);
+        if (const bool.fromEnvironment('NOD_SYNTHETIC_LINK_CHECK')) {
+          await command('parity/link-ready');
+          await _pumpUntil(tester, find.text('Synthetic saved task'));
+          expect(find.byKey(const Key('back-to-chat')), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          debugPrint(
+            'Synthetic foreground OS link opened authenticated tasks.',
+          );
+        }
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();

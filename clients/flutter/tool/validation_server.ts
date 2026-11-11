@@ -30,6 +30,7 @@ interface FixtureStore {
     privateSubmissions: number;
     accountWrites: number;
     aroundReads: number;
+    linkReady?: boolean;
     theme: 'light' | 'dark';
     usageData: boolean;
     traces: boolean;
@@ -348,6 +349,8 @@ app.post<{ Params: { action: string } }>('/fixture/parity/:action', async (reque
     store.parity.source = false;
   } else if (action === 'expire-private') {
     store.parity.privateStatus = 'expired';
+  } else if (action === 'link-ready') {
+    store.parity.linkReady = true;
   } else if (action !== 'inspect') {
     return reply.code(404).send({ error: 'Unknown fixture action.' });
   }
