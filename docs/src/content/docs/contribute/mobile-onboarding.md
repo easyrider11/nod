@@ -52,7 +52,7 @@ The plugin can replay its startup URI as the first stream event. The shell reads
 
 The iOS URL scheme registration accepts `nod`; its parser enforces the `open` host and exact path. Android registers only the `nod` scheme and `open` host. Flutter's built-in deep-link routing is disabled on both platforms so the plugin, rather than a second router, receives these links. This is custom-scheme registration, not iOS Universal Links or verified Android HTTPS App Links. Other apps can claim a custom scheme too, so links never carry pairing credentials.
 
-Synthetic bridge and shell checks verify exact routing, authentication, startup replay, and logout fencing. They do not prove cold-start, foreground, or background URL delivery from the operating system. Device URL delivery remains a separate runtime gate.
+Synthetic bridge and shell checks verify exact routing, authentication, startup replay, and logout fencing. They do not prove cold-start, foreground, or background URL delivery from the operating system. Device URL delivery remains a separate runtime gate. The optional [foreground check](/contribute/mobile-validation/) must reach the authenticated page after any iOS **Open in “Nod”?** prompt is accepted; registering a scheme or a successful `simctl` command alone doesn't prove delivery.
 
 :::caution[Remote push is blocked]
 There is no APNs or FCM device registration or delivery infrastructure in this client. Push needs an owner-approved architecture and credentials decision, followed by platform permission, delivery, and device checks. No permission toggle pretends that this exists.

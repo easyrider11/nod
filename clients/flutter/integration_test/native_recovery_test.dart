@@ -176,7 +176,11 @@ void main() {
         await runParityWorkflows(tester, repository, origin, controlToken);
         if (const bool.fromEnvironment('NOD_SYNTHETIC_LINK_CHECK')) {
           await command('parity/link-ready');
-          await _pumpUntil(tester, find.text('Synthetic saved task'));
+          await _pumpUntil(
+            tester,
+            find.text('Synthetic saved task'),
+            timeout: const Duration(minutes: 1),
+          );
           expect(find.byKey(const Key('back-to-chat')), findsOneWidget);
           expect(tester.takeException(), isNull);
           debugPrint(
@@ -200,8 +204,12 @@ Future<NodEvent> _nextTurn(HttpNodRepository repository, NodTurnState turn) =>
         .first
         .timeout(const Duration(seconds: 15));
 
-Future<void> _pumpUntil(WidgetTester tester, Finder finder) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 15));
+Future<void> _pumpUntil(
+  WidgetTester tester,
+  Finder finder, {
+  Duration timeout = const Duration(seconds: 15),
+}) async {
+  final deadline = DateTime.now().add(timeout);
   while (finder.evaluate().isEmpty && DateTime.now().isBefore(deadline)) {
     await tester.pump(const Duration(milliseconds: 50));
   }
