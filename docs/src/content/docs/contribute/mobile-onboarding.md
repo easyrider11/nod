@@ -38,11 +38,21 @@ These settings do not request operating-system permission or enable phone alerts
 
 ## Incoming links and platform gates
 
-`NodMobileRoute.parse` accepts relative known paths or absolute URLs on the exact paired origin only after authentication. It recognizes chat, the existing `/tasks` list, `/prepared/<uuid>`, existing private sign-in and payment request links, and `/browser`. Private sign-in IDs use the existing server request-token format, not a new pairing credential. Never generate links containing the connection access token.
+`NodMobileRoute.parse` accepts the established desktop `nod://open/<path>` syntax after authentication. Known paths match the shared app page list: chat, `/tasks`, `/apps`, `/channels`, `/usage`, `/vault`, `/settings`, and its notifications, models, voice, memory, and privacy pages. `/prepared/<uuid>` opens a prepared result. For example, `nod://open/settings/models` opens model settings. These links select a page, never pair an account or approve an action.
 
-The parser rejects other origins, embedded credentials, queries, fragments, encoded paths, traversal, and unknown routes. Parsing is not authorization. The caller must use the current authenticated transport, fetch the exact referenced request or result, and let the server reject removed, expired, replaced, or other-owner data. `/browser` must resolve the currently pending server handoff, never assume a turn from the link. The current web task path opens the task list, not an invented task-detail URL.
+Relative known paths and absolute URLs on the exact paired origin also work. Existing private sign-in and payment request links and `/browser` remain limited to this authenticated same-origin path, not the `nod` scheme. Private sign-in IDs use the existing server request-token format, not a new pairing credential. Never generate links containing the connection access token.
 
-Native URL registration, cold-start delivery, routing before authentication, and shared-shell dispatch need central platform integration. Do not preserve a pending route across a server or owner change. Finishing onboarding should open chat, rather than follow a deferred link.
+The parser rejects other origins, embedded credentials, queries, fragments, encoded paths, traversal, control characters, and unknown routes. Parsing is not authorization. The caller must use the current authenticated transport, fetch the exact referenced request or result, and let the server reject removed, expired, replaced, or other-owner data. `/browser` must resolve the currently pending server handoff, never assume a turn from the link. No task-detail URL is invented.
+
+`NodMobileLinkSource` supplies an `initialUri()` and a `uris` stream. `NodPlatformMobileLinkSource` uses `app_links` to receive platform events. It checks the raw text before parsing, so URI normalization cannot hide traversal or encoded paths. It does not authenticate, queue a destination, navigate, or submit anything. The shared shell owns those decisions and handles stream errors and cancellation.
+
+Only subscribe for dispatch with a current authenticated pairing. Route the startup URI only after restoring the same stored pairing. Drop a startup link when the app launched unpaired, and never defer it until a new pairing succeeds. Cancel dispatch on disconnect and discard any pending destination when the owner or origin changes. Finishing onboarding should open chat, rather than follow a deferred link.
+
+The plugin can replay its startup URI as the first stream event. Calling `initialUri()` does not consume that replay. The shell must suppress startup replay when it was dropped, and deduplicate it when it was already routed. The source itself has no owner identity and cannot make that decision.
+
+The iOS URL scheme registration accepts `nod`; its parser enforces the `open` host and exact path. Android registers only the `nod` scheme and `open` host. Flutter's built-in deep-link routing is disabled on both platforms so the plugin, rather than a second router, receives these links. This is custom-scheme registration, not iOS Universal Links or verified Android HTTPS App Links. Other apps can claim a custom scheme too, so links never carry pairing credentials.
+
+Registration and the synthetic bridge checks do not prove cold-start, foreground, or background URL delivery on a device. Native runtime checks and shared-shell dispatch validation remain central integration gates.
 
 :::caution[Remote push is blocked]
 There is no APNs or FCM device registration or delivery infrastructure in this client. Push needs an owner-approved architecture and credentials decision, followed by platform permission, delivery, and device checks. No permission toggle pretends that this exists.
@@ -55,10 +65,10 @@ From `clients/flutter`, run:
 ```sh
 flutter pub get
 flutter test test/api/onboarding_repository_test.dart
-flutter analyze lib/core/onboarding.dart lib/api/onboarding_repository.dart lib/features/onboarding test/api/onboarding_repository_test.dart
+flutter analyze lib/core/onboarding.dart lib/core/mobile_links.dart lib/api/onboarding_repository.dart lib/features/onboarding test/api/onboarding_repository_test.dart
 ```
 
-These are synthetic HTTP-contract and widget checks. They cover authentication headers, consent gates, optional steps, model prerequisites, preparation failure, single-flight completion, owner-change clearing, pause writes, foreground refresh, and unsafe route rejection. They do not prove full server database isolation, native URL delivery, phone permissions, push delivery, live models, or real sign-ins.
+These are synthetic HTTP-contract and widget checks. They cover authentication headers, consent gates, optional steps, model prerequisites, preparation failure, single-flight completion, owner-change clearing, pause writes, foreground refresh, unsafe route rejection, and plugin channel delivery, errors, and cancellation. They do not prove full server database isolation, native URL delivery, phone permissions, push delivery, live models, or real sign-ins.
 
 ## Related resources
 

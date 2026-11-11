@@ -63,7 +63,22 @@ enum NodMobileDestination {
   credentials,
   payment,
   browser,
+  apps,
+  channels,
+  usage,
+  vault,
+  settings,
+  notifications,
+  models,
+  voice,
+  memory,
+  privacy,
 }
+
+bool nodMobileLinkTextIsSafe(String value) =>
+    value.isNotEmpty &&
+    !RegExp(r'[\x00-\x20\x7f%\\]').hasMatch(value) &&
+    !value.split('/').any((part) => part == '.' || part == '..');
 
 class NodMobileRoute {
   const NodMobileRoute(this.destination, {this.id});
@@ -75,12 +90,7 @@ class NodMobileRoute {
     required Uri pairedOrigin,
     required bool authenticated,
   }) {
-    if (!authenticated ||
-        value.contains('\\') ||
-        value.contains('%') ||
-        value.split('/').any((part) => part == '.' || part == '..')) {
-      return null;
-    }
+    if (!authenticated || !nodMobileLinkTextIsSafe(value)) return null;
     final uri = Uri.tryParse(value);
     if (uri == null ||
         uri.userInfo.isNotEmpty ||
@@ -88,9 +98,14 @@ class NodMobileRoute {
         uri.hasFragment) {
       return null;
     }
+    final custom = uri.scheme == 'nod';
     try {
       final origin = validateNodOrigin(pairedOrigin);
-      if (uri.hasScheme || uri.hasAuthority) {
+      if (custom) {
+        if (!value.startsWith('nod://open/') || uri.authority != 'open') {
+          return null;
+        }
+      } else if (uri.hasScheme || uri.hasAuthority) {
         if (!uri.hasScheme || uri.origin != origin.origin) return null;
       } else if (!value.startsWith('/') || value.startsWith('//')) {
         return null;
@@ -105,10 +120,32 @@ class NodMobileRoute {
         return const NodMobileRoute(NodMobileDestination.chat);
       case '/tasks':
         return const NodMobileRoute(NodMobileDestination.tasks);
+      case '/apps':
+        return const NodMobileRoute(NodMobileDestination.apps);
+      case '/channels':
+        return const NodMobileRoute(NodMobileDestination.channels);
+      case '/usage':
+        return const NodMobileRoute(NodMobileDestination.usage);
+      case '/vault':
+        return const NodMobileRoute(NodMobileDestination.vault);
+      case '/settings':
+        return const NodMobileRoute(NodMobileDestination.settings);
+      case '/settings/notifications':
+        return const NodMobileRoute(NodMobileDestination.notifications);
+      case '/settings/models':
+        return const NodMobileRoute(NodMobileDestination.models);
+      case '/settings/voice':
+        return const NodMobileRoute(NodMobileDestination.voice);
+      case '/settings/memory':
+        return const NodMobileRoute(NodMobileDestination.memory);
+      case '/settings/privacy':
+        return const NodMobileRoute(NodMobileDestination.privacy);
       case '/browser':
-        return const NodMobileRoute(NodMobileDestination.browser);
+        return custom
+            ? null
+            : const NodMobileRoute(NodMobileDestination.browser);
     }
-    final private = NodPrivateRequestRef.fromLink(uri.path);
+    final private = custom ? null : NodPrivateRequestRef.fromLink(uri.path);
     if (private != null) {
       return NodMobileRoute(
         private.kind == NodPrivateRequestKind.payment

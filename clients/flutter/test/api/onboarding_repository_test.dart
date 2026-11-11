@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:nod_client/api/http_nod_repository.dart';
 import 'package:nod_client/api/onboarding_repository.dart';
 import 'package:nod_client/core/core.dart';
+import 'package:nod_client/core/mobile_links.dart';
 import 'package:nod_client/core/onboarding.dart';
 import 'package:nod_client/features/onboarding/notification_settings_page.dart';
 import 'package:nod_client/features/onboarding/onboarding_page.dart';
@@ -385,6 +387,151 @@ void main() {
       expect(nodOnboardingModelReady(models()), isFalse);
     },
   );
+
+  test('existing desktop open routes resolve only with a current authenticated pairing', () {
+    final origin = Uri.parse('https://nod.example.test');
+    const routes = {
+      '/': NodMobileDestination.chat,
+      '/tasks': NodMobileDestination.tasks,
+      '/apps': NodMobileDestination.apps,
+      '/channels': NodMobileDestination.channels,
+      '/usage': NodMobileDestination.usage,
+      '/vault': NodMobileDestination.vault,
+      '/settings': NodMobileDestination.settings,
+      '/settings/notifications': NodMobileDestination.notifications,
+      '/settings/models': NodMobileDestination.models,
+      '/settings/voice': NodMobileDestination.voice,
+      '/settings/memory': NodMobileDestination.memory,
+      '/settings/privacy': NodMobileDestination.privacy,
+      '/prepared/10000000-0000-4000-8000-000000000001':
+          NodMobileDestination.prepared,
+    };
+    for (final entry in routes.entries) {
+      for (final prefix in ['nod://open', 'https://nod.example.test']) {
+        expect(
+          NodMobileRoute.parse(
+            '$prefix${entry.key}',
+            pairedOrigin: origin,
+            authenticated: true,
+          )?.destination,
+          entry.value,
+        );
+        expect(
+          NodMobileRoute.parse(
+            '$prefix${entry.key}',
+            pairedOrigin: origin,
+            authenticated: false,
+          ),
+          isNull,
+        );
+      }
+    }
+    for (final value in [
+      'nod://open',
+      'nod://other/tasks',
+      'nod://open:4310/tasks',
+      'nod://name:secret@open/tasks',
+      'NOD://open/tasks',
+      'nod://OPEN/tasks',
+      'nod://open/tasks/',
+      'nod://open/tasks?token=synthetic',
+      'nod://open/tasks#access=synthetic',
+      'nod://open/%74asks',
+      'nod://open/settings/../tasks',
+      'nod://open/browser',
+      'nod://open/payments/10000000-0000-4000-8000-000000000001',
+      'nod://open/credentials/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      'nod://open/vault/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      'nod://open/api/session',
+      ' nod://open/tasks',
+      'nod://open/\ntasks',
+      'nod://open/prepared/not-an-id',
+    ]) {
+      expect(
+        NodMobileRoute.parse(value, pairedOrigin: origin, authenticated: true),
+        isNull,
+        reason: value,
+      );
+    }
+    expect(
+      NodMobileRoute.parse(
+        'nod://open/tasks',
+        pairedOrigin: Uri.parse('http://untrusted.example.test'),
+        authenticated: true,
+      ),
+      isNull,
+    );
+  });
+
+  test('platform bridge preserves safe initial and live links, filters raw traversal and cancels', () async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const messages = MethodChannel('com.llfbandit.app_links/messages');
+    const events = MethodChannel('com.llfbandit.app_links/events');
+    const codec = StandardMethodCodec();
+    String? initial = 'nod://open/tasks';
+    final calls = <String>[];
+    messenger.setMockMethodCallHandler(messages, (call) async {
+      expect(call.method, 'getInitialLink');
+      return initial;
+    });
+    messenger.setMockMethodCallHandler(events, (call) async {
+      calls.add(call.method);
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(messages, null);
+      messenger.setMockMethodCallHandler(events, null);
+    });
+    final source = NodPlatformMobileLinkSource();
+    expect((await source.initialUri())?.toString(), initial);
+    for (final unsafe in [
+      'nod://open/settings/../tasks',
+      'nod://open/%74asks',
+      'nod://open/tasks?token=synthetic',
+      'nod://open/tasks#access=synthetic',
+      'https://name:secret@nod.example.test/tasks',
+      'nod://open/\ntasks',
+      'NOD://open/tasks',
+    ]) {
+      initial = unsafe;
+      expect(await source.initialUri(), isNull, reason: unsafe);
+    }
+    initial = null;
+    expect(await source.initialUri(), isNull);
+    final received = <Uri>[];
+    final errors = <Object>[];
+    final subscription = source.uris.listen(received.add, onError: errors.add);
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, ['listen']);
+    for (final value in [
+      'nod://open/settings/../tasks',
+      'nod://open/%74asks',
+      'nod://open/tasks?token=synthetic',
+      'https://nod.example.test/settings/models',
+      'nod://open/apps',
+    ]) {
+      await messenger.handlePlatformMessage(
+        events.name,
+        codec.encodeSuccessEnvelope(value),
+        null,
+      );
+    }
+    await messenger.handlePlatformMessage(
+      events.name,
+      codec.encodeErrorEnvelope(code: 'synthetic-link-error'),
+      null,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(received.map((uri) => uri.toString()), [
+      'https://nod.example.test/settings/models',
+      'nod://open/apps',
+    ]);
+    expect(errors.single, isA<PlatformException>());
+    await subscription.cancel();
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, ['listen', 'cancel']);
+  });
 
   test('routing refuses unauthenticated, cross-origin, credentials and ambiguous paths', () {
     NodMobileRoute? parse(String value, {bool authenticated = true}) =>
