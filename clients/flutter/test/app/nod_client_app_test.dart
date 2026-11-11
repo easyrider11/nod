@@ -4,12 +4,48 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nod_client/app/nod_client_app.dart';
+import 'package:nod_client/core/api_transport.dart';
 import 'package:nod_client/core/app_connections.dart';
 import 'package:nod_client/core/core.dart';
 import 'package:nod_client/features/apps/apps_page.dart';
 import 'package:nod_client/features/chat/chat_testing.dart';
 
 void main() {
+  testWidgets('native navigation reaches paired tasks and private routes', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = _TransportFixture();
+    addTearDown(repository.chat.dispose);
+    await tester.pumpWidget(
+      NodClientApp(
+        repository: repository,
+        restoreConnection: () async => true,
+        disposeRepository: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final section in ['tasks', 'prepared', 'private entry']) {
+      await tester.tap(find.byTooltip('Open menu'));
+      await tester.pumpAndSettle();
+      final destination = find.byKey(Key('mobile-navigation-$section'));
+      await tester.ensureVisible(destination);
+      await tester.tap(destination);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byTooltip('Back to chat'));
+      await tester.pumpAndSettle();
+    }
+    expect(repository.paths, contains('/api/tasks'));
+    expect(
+      repository.paths.where((path) => path == '/api/state').length,
+      greaterThanOrEqualTo(2),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
   testWidgets(
     'mobile Log out is the last menu item and disconnects only when selected',
     (tester) async {
@@ -286,6 +322,44 @@ void main() {
       expect(find.byKey(const Key('connection-origin')), findsOneWidget);
     },
   );
+}
+
+class _TransportFixture implements NodRepository, NodApiTransport {
+  final chat = FakeNodRepository();
+  final paths = <String>[];
+
+  @override
+  Future<Object?> requestJson(
+    String method,
+    String path, {
+    Map<String, Object?>? body,
+  }) async {
+    paths.add(path);
+    if (method == 'GET' && path == '/api/tasks') return <Object?>[];
+    if (method == 'GET' && path == '/api/state') {
+      return {'messages': <Object?>[], 'turns': <Object?>[]};
+    }
+    throw const NodRequestException();
+  }
+
+  @override
+  Stream<NodConnectionState> get connectionStates => chat.connectionStates;
+  @override
+  Stream<NodEvent> get events => chat.events;
+  @override
+  Future<void> connect(NodConnectionConfig config) => chat.connect(config);
+  @override
+  Future<void> disconnect() => chat.disconnect();
+  @override
+  Future<NodState> loadState() => chat.loadState();
+  @override
+  Future<NodHistory> loadHistory({String? cursor}) =>
+      chat.loadHistory(cursor: cursor);
+  @override
+  Future<void> sendText(String text, {required String clientMessageId}) =>
+      chat.sendText(text, clientMessageId: clientMessageId);
+  @override
+  Future<void> stop() => chat.stop();
 }
 
 class _AppsFixture implements NodAppsRepository {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../api/api.dart';
+import '../core/api_transport.dart';
 import '../core/app_connections.dart';
 import '../core/core.dart';
 import '../core/schedules.dart';
@@ -10,7 +11,10 @@ import '../core/usage.dart';
 import '../design_system/design_system.dart';
 import '../features/apps/apps_page.dart';
 import '../features/chat/chat.dart';
+import '../features/prepared/prepared_page.dart';
+import '../features/private_requests/private_requests_page.dart';
 import '../features/scheduled/scheduled_page.dart';
+import '../features/tasks/tasks_page.dart';
 import '../features/usage/usage_page.dart';
 import '../motion/motion.dart';
 
@@ -37,6 +41,7 @@ class _NodClientAppState extends State<NodClientApp> {
   var _restoring = true;
   var _connected = false;
   var _selectedIndex = 0;
+  String? _focusMessageId;
   String? _connectionError;
 
   @override
@@ -120,8 +125,18 @@ class _NodClientAppState extends State<NodClientApp> {
             ? _ConnectedShell(
                 repository: _repository,
                 selectedIndex: _selectedIndex,
+                focusMessageId: _focusMessageId,
+                onShowMessage: (id) {
+                  setState(() {
+                    _focusMessageId = id;
+                    _selectedIndex = 0;
+                  });
+                },
                 onDestinationSelected: (index) {
-                  setState(() => _selectedIndex = index);
+                  setState(() {
+                    _selectedIndex = index;
+                    _focusMessageId = null;
+                  });
                 },
                 onLogOut: _logOut,
               )
@@ -348,8 +363,12 @@ class _ConnectedShell extends StatelessWidget {
     required this.selectedIndex,
     required this.onDestinationSelected,
     required this.onLogOut,
+    required this.onShowMessage,
+    this.focusMessageId,
   });
 
+  final String? focusMessageId;
+  final ValueChanged<String> onShowMessage;
   final NodRepository repository;
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
@@ -357,7 +376,45 @@ class _ConnectedShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final transport = repository is NodApiTransport
+        ? repository as NodApiTransport
+        : null;
+    final destinations = [
+      ...NodNavigationModel.destinations,
+      if (transport != null) ...[
+        const NodNavigationDestination(
+          label: 'Tasks',
+          icon: Icons.task_outlined,
+          selectedIcon: Icons.task,
+        ),
+        const NodNavigationDestination(
+          label: 'Prepared',
+          icon: Icons.drafts_outlined,
+          selectedIcon: Icons.drafts,
+        ),
+        const NodNavigationDestination(
+          label: 'Private entry',
+          icon: Icons.lock_outline,
+          selectedIcon: Icons.lock,
+        ),
+      ],
+    ];
+    void showMessage(String id) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      onShowMessage(id);
+    }
+
+    void openPrivate() {
+      if (transport == null) return;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => NodPrivateRequestsPage(transport: transport),
+        ),
+      );
+    }
+
     return NodAdaptiveShell(
+      destinations: destinations,
       selectedIndex: selectedIndex,
       onDestinationSelected: (index) {
         FocusManager.instance.primaryFocus?.unfocus();
@@ -367,7 +424,22 @@ class _ConnectedShell extends StatelessWidget {
       body: IndexedStack(
         index: selectedIndex == 0 ? 0 : 1,
         children: [
-          NodChat(repository: repository, active: selectedIndex == 0),
+          NodChat(
+            repository: repository,
+            active: selectedIndex == 0,
+            focusMessageId: focusMessageId,
+            privateRequestBuilder: transport == null
+                ? null
+                : (context, requests) => TextButton.icon(
+                    onPressed: openPrivate,
+                    icon: const Icon(Icons.lock_outline),
+                    label: Text(
+                      requests.isEmpty
+                          ? 'Private entry and browser'
+                          : 'Complete private request',
+                    ),
+                  ),
+          ),
           selectedIndex == 1 && repository is NodSchedulesRepository
               ? NodScheduledPage(
                   repository: repository as NodSchedulesRepository,
@@ -377,9 +449,13 @@ class _ConnectedShell extends StatelessWidget {
               ? NodUsagePage(repository: repository as NodUsageRepository)
               : selectedIndex == 2 && repository is NodAppsRepository
               ? NodAppsPage(repository: repository as NodAppsRepository)
-              : _SectionPlaceholder(
-                  destination: NodNavigationModel.destinations[selectedIndex],
-                ),
+              : selectedIndex == 4 && transport != null
+              ? NodTasksPage(transport: transport, onShowMessage: showMessage)
+              : selectedIndex == 5 && transport != null
+              ? NodPreparedPage(transport: transport)
+              : selectedIndex == 6 && transport != null
+              ? NodPrivateRequestsPage(transport: transport)
+              : _SectionPlaceholder(destination: destinations[selectedIndex]),
         ],
       ),
     );
