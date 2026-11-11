@@ -14,6 +14,44 @@ import 'package:nod_client/features/onboarding/onboarding_page.dart';
 import 'package:nod_client/features/prepared/prepared_page.dart';
 
 void main() {
+  for (final failed in [false, true]) {
+    testWidgets(
+      'Vault session request reaches normal chat once, failure=$failed',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(390, 844));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final repository = _TransportFixture();
+        addTearDown(repository.chat.dispose);
+        if (failed) repository.chat.queueSendError(const NodOfflineException());
+        await tester.pumpWidget(
+          NodClientApp(
+            repository: repository,
+            restoreConnection: () async => true,
+            disposeRepository: false,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('open-navigation')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('mobile-navigation-vault')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Synthetic session'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Sign in again'));
+        await tester.tap(find.text('Sign in again'));
+        await tester.pumpAndSettle();
+        expect(repository.chat.sentTexts, hasLength(1));
+        expect(
+          repository.chat.sentTexts.single.text,
+          'Use browser connection 00000000-0000-4000-8000-000000000104 to open https://reports.example.test/weekly. Check whether it works. If the session expired, help me sign in through the secure form and save the session.',
+        );
+        expect(find.byKey(const Key('chat-composer')), findsOneWidget);
+        expect(find.byType(SnackBar), failed ? findsOneWidget : findsNothing);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
   testWidgets(
     'restored links are authenticated, exact, deduplicated and dropped after logout',
     (tester) async {
@@ -454,9 +492,15 @@ class _LinkFixture implements NodMobileLinkSource {
 }
 
 class _TransportFixture
-    implements NodRepository, NodApiTransport, NodPairedOrigin {
+    implements
+        NodRepository,
+        NodApiTransport,
+        NodPairedOrigin,
+        NodConnectionScope {
   _TransportFixture({this.completed = true});
   final bool completed;
+  @override
+  int connectionGeneration = 0;
   @override
   Uri get pairedOrigin => Uri.parse('https://nod.example.test');
   final chat = FakeNodRepository();
@@ -469,7 +513,28 @@ class _TransportFixture
     Map<String, Object?>? body,
   }) async {
     paths.add(path);
-    if (method == 'GET' && path == '/api/tasks') return <Object?>[];
+    if (method == 'GET' && (path == '/api/tasks' || path == '/api/vault')) {
+      return <Object?>[];
+    }
+    if (method == 'GET' && path == '/api/vault/sessions') {
+      return [
+        {
+          'id': '00000000-0000-4000-8000-000000000104',
+          'kind': 'session',
+          'label': 'Synthetic session',
+          'origin': 'https://reports.example.test',
+          'url': 'https://reports.example.test/weekly',
+          'state': 'needs_sign_in',
+        },
+      ];
+    }
+    if (method == 'GET' && Uri.parse(path).path == '/api/vault/activity') {
+      return {
+        'entries': <Object?>[],
+        'next': null,
+        'week': {'signIns': 0, 'payments': 0, 'held': 0},
+      };
+    }
     if (method == 'GET' && path == '/api/session') {
       return {
         'user': {'id': 'synthetic-owner'},
@@ -495,9 +560,17 @@ class _TransportFixture
   @override
   Stream<NodEvent> get events => chat.events;
   @override
-  Future<void> connect(NodConnectionConfig config) => chat.connect(config);
+  Future<void> connect(NodConnectionConfig config) async {
+    connectionGeneration++;
+    await chat.connect(config);
+  }
+
   @override
-  Future<void> disconnect() => chat.disconnect();
+  Future<void> disconnect() async {
+    connectionGeneration++;
+    await chat.disconnect();
+  }
+
   @override
   Future<NodState> loadState() => chat.loadState();
   @override

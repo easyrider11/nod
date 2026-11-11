@@ -28,7 +28,7 @@ Copied values can be available to other apps, clipboard history, or cross-device
 
 **Delete login** and **Delete card** ask you to confirm removal. An unreadable login can still be deleted without opening its secrets. **Sign out** removes a saved browser session, not its saved login.
 
-When a session needs sign-in or hasn't finished signing in, select **Sign in again**. Nod checks the current session and sends your request through normal chat with that session's ID and website address. It doesn't sign in automatically or skip the normal private-entry and Trust checks. If the session changed, reopen it before continuing.
+When a session needs sign-in or hasn't finished signing in, select **Sign in again**. Nod checks the current session and sends your request through normal chat with that session's ID and website address. It opens chat without signing in automatically or skipping the normal private-entry and Trust checks. If the session changed, reopen it before continuing. A send that can't be confirmed leaves a notice in chat and is never retried automatically. Check the conversation before sending the request again.
 
 ## Add or import logins
 

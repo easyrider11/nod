@@ -185,6 +185,41 @@ class _NodClientAppState extends State<NodClientApp> {
     }
   }
 
+  Future<void> _askFromVault(String text) async {
+    if (!mounted || !_connected || _restoring || _needsOnboarding) return;
+    final scope = _repository is NodConnectionScope
+        ? _repository as NodConnectionScope
+        : null;
+    final generation = scope?.connectionGeneration;
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    setState(() {
+      _focusMessageId = null;
+      _selectedIndex = 0;
+    });
+    try {
+      await _repository.sendText(
+        text,
+        clientMessageId: newNodClientMessageId(),
+      );
+    } on Object {
+      if (!mounted ||
+          !_connected ||
+          scope?.connectionGeneration != generation) {
+        return;
+      }
+      final context = _navigatorKey.currentContext;
+      if (context != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'This request could not be confirmed. Check the chat before sending it again.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   void _showMessage(String id) {
     _navigatorKey.currentState?.popUntil((route) => route.isFirst);
     setState(() {
@@ -326,6 +361,7 @@ class _NodClientAppState extends State<NodClientApp> {
                   setState(() => _accountTheme = value);
                 },
                 onShowMessage: _showMessage,
+                onAsk: _askFromVault,
                 onDestinationSelected: (index) {
                   setState(() {
                     _selectedIndex = index;
@@ -558,6 +594,7 @@ class _ConnectedShell extends StatelessWidget {
     required this.onDestinationSelected,
     required this.onLogOut,
     required this.onShowMessage,
+    required this.onAsk,
     this.focusMessageId,
     required this.onThemeChanged,
   });
@@ -565,6 +602,7 @@ class _ConnectedShell extends StatelessWidget {
   final ValueChanged<ThemeMode> onThemeChanged;
   final String? focusMessageId;
   final ValueChanged<String> onShowMessage;
+  final Future<void> Function(String text) onAsk;
   final NodRepository repository;
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
@@ -693,7 +731,7 @@ class _ConnectedShell extends StatelessWidget {
                   onShowMessage: showMessage,
                 )
               : selectedIndex == 8 && transport != null
-              ? NodVaultPage(transport: transport)
+              ? NodVaultPage(transport: transport, onAsk: onAsk)
               : selectedIndex == 9 && transport != null
               ? NodNotificationSettingsPage(transport: transport)
               : _SectionPlaceholder(destination: destinations[selectedIndex]),

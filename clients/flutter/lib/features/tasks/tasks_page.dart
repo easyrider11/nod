@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 
 import '../../api/tasks_repository.dart';
 import '../../core/api_transport.dart';
 import '../../core/nod_errors.dart';
+import '../../core/nod_repository.dart';
 import '../../core/tasks.dart';
 import 'task_schedule_form.dart';
 import 'task_text.dart';
@@ -387,17 +387,9 @@ class _TaskReply extends StatefulWidget {
 
 class _TaskReplyState extends State<_TaskReply> {
   final _text = TextEditingController();
-  late final _clientId = _uuid();
+  late final _clientId = newNodClientMessageId();
   bool _sent = false;
   String? _error;
-
-  String _uuid() {
-    final bytes = List.generate(16, (_) => Random.secure().nextInt(256));
-    bytes[6] = (bytes[6] & 15) | 64;
-    bytes[8] = (bytes[8] & 63) | 128;
-    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
-  }
 
   Future<void> _send() async {
     if (_sent || _text.text.trim().isEmpty) return;
