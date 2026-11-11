@@ -205,6 +205,25 @@ class _NodScheduledPageState extends State<NodScheduledPage>
         Text('Instructions', style: theme.textTheme.titleSmall),
         const SizedBox(height: NodSpacing.xs),
         SelectableText(schedule.prompt),
+        if (schedule.watch.isNotEmpty) ...[
+          const SizedBox(height: NodSpacing.md),
+          Text('Watches for changes', style: theme.textTheme.titleSmall),
+          const Text(
+            'Runs can skip when these accounts are unchanged after a successful run.',
+          ),
+          Text('${schedule.watch.length} connected accounts'),
+        ],
+        if (schedule.baseline case final NodScheduleBaseline baseline) ...[
+          const SizedBox(height: NodSpacing.md),
+          Text('Saved baseline', style: theme.textTheme.titleSmall),
+          SelectableText(baseline.summary),
+          if (baseline.value != null) SelectableText(baseline.value!),
+          Text(baseline.status == 'verified' ? 'Verified' : 'Unavailable'),
+          SelectableText(baseline.sourceUrl),
+          Text(
+            'Checked ${scheduleDate(context, baseline.checkedAt)} (device time)',
+          ),
+        ],
         const SizedBox(height: NodSpacing.md),
         Wrap(
           spacing: NodSpacing.md,

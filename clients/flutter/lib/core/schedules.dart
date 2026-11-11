@@ -53,6 +53,17 @@ class NodSchedule {
       timeZone = _text(json, 'timeZone'),
       nextRun = _date(json, 'nextRun'),
       monthlyUsd = _cost(json['monthlyUsd']),
+      watch = json['watch'] == null
+          ? const []
+          : (json['watch'] as List).map((value) {
+              if (value is! String) throw const NodProtocolException();
+              return value;
+            }).toList(),
+      baseline = json['baselineObservation'] == null
+          ? null
+          : NodScheduleBaseline.fromJson(
+              scheduleMap(json['baselineObservation']),
+            ),
       lastRun = json['lastRun'] == null
           ? null
           : NodScheduleRun.fromJson(scheduleMap(json['lastRun'])),
@@ -74,8 +85,23 @@ class NodSchedule {
   final int revision;
   final double? monthlyUsd;
   final NodScheduleRun? lastRun;
+  final List<String> watch;
+  final NodScheduleBaseline? baseline;
   bool get canResume =>
       kind != 'once' || (runAt?.isAfter(DateTime.now()) ?? false);
+}
+
+class NodScheduleBaseline {
+  NodScheduleBaseline.fromJson(Map<String, dynamic> json)
+    : summary = _text(json, 'summary'),
+      sourceUrl = _text(json, 'sourceUrl'),
+      checkedAt =
+          _date(json, 'checkedAt') ?? (throw const NodProtocolException()),
+      status = _text(json, 'status'),
+      value = _optionalText(json, 'value');
+  final String summary, sourceUrl, status;
+  final String? value;
+  final DateTime checkedAt;
 }
 
 class NodScheduleRun {
