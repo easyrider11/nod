@@ -39,7 +39,11 @@ Open **Voice & audio** to select automatic or a listed voice, set when replies a
 
 When the server supports local audio, select **Free audio on your Nod server** to download its voice and recognition models. This runs on the server, not the phone. Reload to check preparation state. A timeout doesn't prove the download stopped; check its state before starting another request.
 
-Recording uses the system microphone. Grant permission when recording in chat, or change denied permission in device settings. Mobile settings don't yet provide voice previews or a microphone-device picker. Those limits don't change the saved voice or spoken-reply preferences.
+Select **Preview voice** to hear the selected voice, or the server's automatic voice. **Stop preview** discards pending audio or stops playback. A failed request shows an error and isn't retried automatically. Select **Preview voice** again to make a new request.
+
+Preview audio uses the authenticated `/api/speech/preview` route. One preview request or player is active at a time. The native player reads only a temporary local file, never the server token. Leaving the page, backgrounding the app, or changing the paired connection stops playback and clears the temporary copy. A pending request's result is discarded after Stop; Stop doesn't prove synthesis on the server stopped.
+
+Recording uses the system microphone. Grant permission when recording in chat, or change denied permission in device settings. Mobile settings don't provide a microphone-device picker.
 
 ## Review memory and skills
 
@@ -51,7 +55,7 @@ Open **Memory** to search notes or choose **Confirmed**, **Learned**, **Mentione
 - Select **Add note** to choose a category and write one fact.
 - Turn off **Save new notes** to stop learning. Turning on **Include sensitive details** requires confirmation.
 
-Source excerpts remain readable here. Opening a source message in chat isn't wired into this standalone settings package. Skills are context, never permission to act.
+Source excerpts remain readable here. Hosts can pass `onShowMessage` to `NodSettingsPage` to handle **Show message**. The action appears only for a real source ID that the server marks as openable in the current chat. The host must close settings and focus that message. Skills are context, never permission to act.
 
 ### Import and export
 
@@ -61,7 +65,9 @@ Source excerpts remain readable here. Opening a source message in chat isn't wir
 
 The server checks each note, skips duplicates and unsafe content, and returns counts. Imported notes are confirmed context, not action permission.
 
-**Export JSON** opens the device share sheet with a file containing the current memory view, including active notes, archived notes, sources, and learned skills. It differs from the web client's Markdown download. Keep exported files private. The import form accepts pasted note text, not a full archive or skill restore; the server exposes no skill-import endpoint.
+**Export Markdown** downloads the same `/api/memory/export` response as web and opens the device share sheet with `nod-memory.md`. The file preserves the response bytes without rewriting the Markdown. Mobile accepts only a nonempty Markdown response up to 16 MiB and ignores server-supplied filenames. Its temporary copy is deleted when sharing returns, is cancelled, or fails. Leaving the page or changing connections before sharing discards the result. Files you save or send through another app remain there; keep them private.
+
+The import form accepts pasted note text, not a full archive or skill restore; the server exposes no skill-import endpoint.
 
 ## Control sharing and reset the conversation
 
@@ -75,7 +81,7 @@ Usage data excludes messages and screen recordings. Conversation traces include 
 
 ## Validation boundaries
 
-Focused transport tests exercise the real authenticated HTTP client with synthetic responses, including narrow settings patches, model selection, archive revisions, path refusal, and server errors without automatic retries. Widget checks cover explicit trace consent and preserving rejected drafts.
+Focused transport tests exercise the real authenticated HTTP client with synthetic responses, including narrow settings patches, model selection, archive revisions, path refusal, and server errors without automatic retries. Widget checks cover explicit trace consent, preserving rejected drafts, source-message binding, and preview background cleanup. Synthetic binary-route checks cover authenticated requests, exact export bytes, MIME and size rejection, one-shot failures, stale preview results, temporary-file cleanup, and the native audio-player port's open/play/pause/dispose lifecycle.
 
 These checks don't contact a model or account, download audio models, run native plugins, or validate physical devices. Native runtime checks and the docs build are separate integration gates.
 

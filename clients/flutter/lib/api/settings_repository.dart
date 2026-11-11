@@ -64,6 +64,56 @@ class NodSettingsRepository {
       _request('POST', '/api/speech/voices/refresh');
   Future<Map<String, Object?>> prepareSpeech(String locale) =>
       _request('POST', '/api/speech/prepare', {'locale': locale});
+  int? get connectionGeneration => switch (transport) {
+    final NodConnectionScope scope => scope.connectionGeneration,
+    _ => null,
+  };
+
+  Future<NodBinaryResponse> _binary(
+    String method,
+    String path,
+    Set<String> mimeTypes, {
+    Map<String, Object?>? body,
+  }) async {
+    final binary = transport;
+    if (binary is! NodBinaryTransport) throw const NodProtocolException();
+    final generation = connectionGeneration;
+    final response = await (binary as NodBinaryTransport).requestBytes(
+      method,
+      path,
+      body: body,
+    );
+    if (generation != connectionGeneration) throw const NodRequestException();
+    final mimeType = response.mimeType.split(';').first.trim().toLowerCase();
+    if (!mimeTypes.contains(mimeType) ||
+        response.bytes.isEmpty ||
+        response.bytes.length > 16 * 1024 * 1024) {
+      throw const NodProtocolException();
+    }
+    return NodBinaryResponse(bytes: response.bytes, mimeType: mimeType);
+  }
+
+  Future<NodBinaryResponse> previewVoice(String? voice, String locale) =>
+      _binary(
+        'POST',
+        '/api/speech/preview',
+        {
+          'audio/mpeg',
+          'audio/wav',
+          'audio/x-wav',
+          'audio/mp4',
+          'audio/x-m4a',
+          'audio/aac',
+          'audio/ogg',
+          'audio/flac',
+          'audio/webm',
+        },
+        body: {'voice': voice, 'locale': locale},
+      );
+
+  Future<NodBinaryResponse> exportMemory() =>
+      _binary('GET', '/api/memory/export', {'text/markdown'});
+
   Future<Map<String, Object?>> memory() => _request('GET', '/api/memory');
   Future<Map<String, Object?>> saveMemorySettings(Map<String, Object?> patch) =>
       _request('PATCH', '/api/memory', patch);

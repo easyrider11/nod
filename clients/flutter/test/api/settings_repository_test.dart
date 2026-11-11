@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +9,9 @@ import 'package:nod_client/api/http_nod_repository.dart';
 import 'package:nod_client/api/settings_repository.dart';
 import 'package:nod_client/core/core.dart';
 import 'package:nod_client/core/settings.dart';
+import 'package:nod_client/features/chat/audio_playback.dart';
+import 'package:nod_client/features/settings/memory_settings_page.dart';
+import 'package:nod_client/features/settings/settings_media.dart';
 import 'package:nod_client/features/settings/settings_page.dart';
 import 'package:nod_client/features/settings/settings_widgets.dart';
 
@@ -17,9 +22,15 @@ void main() {
   late NodSettingsRepository repository;
   final requests = <({String method, String path, Object? body})>[];
   var status = 200;
+  List<int>? binaryBytes;
+  var binaryMime = 'audio/mpeg';
+  Completer<void>? binaryGate;
   Object? response = <String, Object?>{};
   setUp(() async {
     status = 200;
+    binaryBytes = null;
+    binaryMime = 'audio/mpeg';
+    binaryGate = null;
     response = <String, Object?>{};
     requests.clear();
     final events = fixture.EventConnection();
@@ -65,6 +76,22 @@ void main() {
           path: request.url.path,
           body: bytes.isEmpty ? null : jsonDecode(utf8.decode(bytes)),
         ));
+        if (request.url.path == '/api/speech/preview' ||
+            request.url.path == '/api/memory/export') {
+          expect(request.followRedirects, isFalse);
+          await binaryGate?.future;
+          if (binaryBytes != null) {
+            return http.StreamedResponse(
+              Stream.value(binaryBytes!),
+              status,
+              headers: {
+                'content-type': binaryMime,
+                'content-disposition':
+                    'attachment; filename="../../outside.html"',
+              },
+            );
+          }
+        }
         return _json(status, response);
       }),
     );
@@ -77,6 +104,288 @@ void main() {
     repository = NodSettingsRepository(transport);
   });
   tearDown(() async => transport.dispose());
+
+  test('binary routes preserve exact bytes and reject MIME, size and server errors without retry', () async {
+    binaryBytes = [0, 255, 19, 7];
+    expect(
+      (await repository.previewVoice('synthetic-voice', 'pt-BR')).bytes,
+      binaryBytes,
+    );
+    expect(
+      requests.single,
+      _request('POST', '/api/speech/preview', {
+        'voice': 'synthetic-voice',
+        'locale': 'pt-BR',
+      }),
+    );
+    binaryMime = 'text/markdown; charset=utf-8';
+    binaryBytes = utf8.encode('# Synthetic memory\r\n- Short replies\n');
+    expect((await repository.exportMemory()).bytes, binaryBytes);
+    expect(requests.last, _request('GET', '/api/memory/export', null));
+    binaryMime = 'text/html';
+    await expectLater(
+      repository.exportMemory(),
+      throwsA(isA<NodProtocolException>()),
+    );
+    binaryMime = 'text/markdown';
+    binaryBytes = [];
+    await expectLater(
+      repository.exportMemory(),
+      throwsA(isA<NodProtocolException>()),
+    );
+    binaryBytes = List.filled(16 * 1024 * 1024 + 1, 1);
+    await expectLater(
+      repository.exportMemory(),
+      throwsA(isA<NodProtocolException>()),
+    );
+    binaryBytes = null;
+    status = 409;
+    await expectLater(
+      repository.previewVoice(null, 'en'),
+      throwsA(isA<NodConflictException>()),
+    );
+    status = 401;
+    await expectLater(
+      repository.exportMemory(),
+      throwsA(isA<NodUnauthorizedException>()),
+    );
+    expect(requests.length, 7);
+  });
+
+  test('Markdown share fixes the path and removes temporary bytes on return, cancellation and failure', () async {
+    binaryBytes = utf8.encode('# Synthetic memory\r\n- Short replies\n');
+    binaryMime = 'text/markdown';
+    final root = await Directory.systemTemp.createTemp('nod-export-test-');
+    addTearDown(() => root.delete(recursive: true));
+    for (final throws in [false, true]) {
+      File? copy;
+      final work = shareMemoryMarkdown(
+        repository,
+        temporaryDirectory: () async => root,
+        isActive: () => true,
+        share: (file) async {
+          copy = file;
+          expect(file.uri.pathSegments.last, 'nod-memory.md');
+          expect(await file.readAsBytes(), binaryBytes);
+          if (throws) throw StateError('Synthetic share failure');
+        },
+      );
+      if (throws) {
+        await expectLater(work, throwsStateError);
+      } else {
+        await work;
+      }
+      expect(await copy!.exists(), isFalse);
+      expect(await root.list().toList(), isEmpty);
+    }
+    var active = true;
+    binaryGate = Completer<void>();
+    final cancelled = shareMemoryMarkdown(
+      repository,
+      temporaryDirectory: () async => root,
+      isActive: () => active,
+      share: (_) async => fail('A cancelled export must not share'),
+    );
+    active = false;
+    binaryGate!.complete();
+    await cancelled;
+    expect(await root.list().toList(), isEmpty);
+  });
+
+  test('preview native player port opens audio once and clears on Stop, completion and scope change', () async {
+    binaryBytes = [0, 255, 19, 7];
+    final root = await Directory.systemTemp.createTemp('nod-preview-test-');
+    addTearDown(() => root.delete(recursive: true));
+    final players = <_PreviewPlayer>[];
+    final preview = SettingsVoicePreview(
+      repository: repository,
+      temporaryDirectory: () async => root,
+      playerFactory: () {
+        final player = _PreviewPlayer();
+        players.add(player);
+        return player;
+      },
+    );
+    addTearDown(preview.dispose);
+    await preview.start(null, 'en');
+    expect(preview.playing, isTrue);
+    expect(await File(players.single.path!).readAsBytes(), binaryBytes);
+    expect(players.single.calls, ['open', 'play']);
+    await preview.start(null, 'en');
+    expect(requests.length, 1);
+    await preview.stop();
+    expect(players.single.calls, ['open', 'play', 'pause', 'dispose']);
+    expect(await root.list().toList(), isEmpty);
+    await preview.start(null, 'en');
+    players.last.ends.add(true);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(preview.playing, isFalse);
+    expect(await root.list().toList(), isEmpty);
+    await preview.start(null, 'en');
+    await transport.disconnect();
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(preview.playing, isFalse);
+    expect(players.last.calls.last, 'dispose');
+    expect(await root.list().toList(), isEmpty);
+  });
+
+  test(
+    'stopped, disposed and stale preview requests never play or retry',
+    () async {
+      binaryBytes = [1, 2, 3];
+      final root = await Directory.systemTemp.createTemp('nod-stale-preview-');
+      addTearDown(() => root.delete(recursive: true));
+      for (final action in ['stop', 'dispose', 'disconnect']) {
+        binaryGate = Completer<void>();
+        final preview = SettingsVoicePreview(
+          repository: repository,
+          temporaryDirectory: () async => root,
+          playerFactory: () =>
+              throw StateError('Must not create a stale player'),
+        );
+        final work = preview.start(null, 'en');
+        await Future<void>.delayed(Duration.zero);
+        await preview.start(null, 'en');
+        if (action == 'stop') {
+          final other = SettingsVoicePreview(
+            repository: repository,
+            playerFactory: () =>
+                throw StateError('Concurrent preview must not play'),
+          );
+          await Future.wait([other.start(null, 'en'), other.start(null, 'en')]);
+          other.dispose();
+        }
+        if (action == 'stop') await preview.stop();
+        if (action == 'dispose') preview.dispose();
+        if (action == 'disconnect') await transport.disconnect();
+        binaryGate!.complete();
+        await work;
+        if (action != 'dispose') preview.dispose();
+        expect(await root.list().toList(), isEmpty);
+      }
+      expect(requests.length, 3);
+    },
+  );
+
+  test(
+    'failed preview is visible and starts again only on explicit request',
+    () async {
+      status = 409;
+      final preview = SettingsVoicePreview(repository: repository);
+      await preview.start(null, 'en');
+      expect(preview.error, isNotNull);
+      expect(preview.playing, isFalse);
+      expect(preview.loading, isFalse);
+      expect(requests.length, 1);
+      await preview.start(null, 'en');
+      expect(requests.length, 2);
+      preview.dispose();
+    },
+  );
+
+  testWidgets(
+    'voice page clears playback when the app backgrounds and when disposed',
+    (tester) async {
+      response = {
+        'transcription': true,
+        'speechReply': 'auto',
+        'speechVoice': null,
+        'voices': <Object?>[],
+      };
+      binaryBytes = [0, 1, 2];
+      final root = await tester.runAsync(
+        () => Directory.systemTemp.createTemp('nod-voice-lifecycle-'),
+      );
+      addTearDown(() => root!.delete(recursive: true));
+      final player = _PreviewPlayer();
+      final preview = SettingsVoicePreview(
+        repository: repository,
+        temporaryDirectory: () async => root!,
+        playerFactory: () => player,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NodVoiceSettingsPage(repository: repository, preview: preview),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Preview voice'));
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Preview voice'));
+        for (var i = 0; i < 100 && !preview.playing; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+      });
+      await tester.pump();
+      expect(preview.error, isNull);
+      expect(preview.playing, isTrue);
+      expect(find.text('Stop preview'), findsOneWidget);
+      await tester.runAsync(() async {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(await root!.list().toList(), isEmpty);
+      });
+      expect(player.calls, ['open', 'play', 'pause', 'dispose']);
+      expect(preview.playing, isFalse);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(
+        requests
+            .where((request) => request.path == '/api/speech/preview')
+            .length,
+        1,
+      );
+    },
+  );
+
+  testWidgets('source actions forward only actual openable message IDs', (
+    tester,
+  ) async {
+    response = {
+      'saving': false,
+      'sensitive': false,
+      'archive': <Object?>[],
+      'skills': <Object?>[],
+      'notes': [
+        {
+          'text': 'Synthetic fact',
+          'area': 'about',
+          'status': 'stated',
+          'sources': [
+            {
+              'id': 'synthetic-message',
+              'text': 'Synthetic source',
+              'canOpenInCurrentChat': true,
+            },
+            {
+              'id': 'outside-chat',
+              'text': 'Other source',
+              'canOpenInCurrentChat': false,
+            },
+            {'text': 'No message ID', 'canOpenInCurrentChat': true},
+          ],
+        },
+      ],
+    };
+    final opened = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NodMemorySettingsPage(
+          repository: repository,
+          onShowMessage: opened.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Synthetic fact'));
+    await tester.pumpAndSettle();
+    expect(find.text('Show message'), findsOneWidget);
+    await tester.ensureVisible(find.text('Show message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Show message'));
+    expect(opened, ['synthetic-message']);
+  });
 
   test(
     'preferences, consent and task check-ins are narrow authenticated patches',
@@ -377,6 +686,38 @@ void main() {
       throwsA(isA<NodProtocolException>()),
     );
   });
+}
+
+class _PreviewPlayer implements AudioClipPlayer {
+  final calls = <String>[];
+  final ends = StreamController<bool>.broadcast();
+  String? path;
+  @override
+  Stream<bool> get completed => ends.stream;
+  @override
+  Stream<bool> get playing => const Stream.empty();
+  @override
+  Stream<Duration> get positions => const Stream.empty();
+  @override
+  Stream<Duration?> get durations => const Stream.empty();
+  @override
+  Future<void> open(String path) async {
+    calls.add('open');
+    this.path = path;
+    if (!await File(path).exists()) throw StateError('Missing audio');
+  }
+
+  @override
+  Future<void> play() async => calls.add('play');
+  @override
+  Future<void> pause() async => calls.add('pause');
+  @override
+  Future<void> seek(Duration position) async {}
+  @override
+  Future<void> dispose() async {
+    calls.add('dispose');
+    await ends.close();
+  }
 }
 
 Matcher _request(String method, String path, Object? body) =>

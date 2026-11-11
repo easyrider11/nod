@@ -1,15 +1,19 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../api/settings_repository.dart';
 import '../../core/settings.dart';
+import 'settings_media.dart';
 import 'settings_widgets.dart';
 
 class NodMemorySettingsPage extends StatefulWidget {
-  const NodMemorySettingsPage({super.key, required this.repository});
+  const NodMemorySettingsPage({
+    super.key,
+    required this.repository,
+    this.onShowMessage,
+  });
   final NodSettingsRepository repository;
+  final ValueChanged<String>? onShowMessage;
   @override
   State<NodMemorySettingsPage> createState() => _NodMemorySettingsPageState();
 }
@@ -144,24 +148,24 @@ class _NodMemorySettingsPageState extends State<NodMemorySettingsPage> {
               TextButton(
                 onPressed: () => state.run(() async {
                   final box = context.findRenderObject() as RenderBox?;
-                  await SharePlus.instance.share(
-                    ShareParams(
-                      files: [
-                        XFile.fromData(
-                          utf8.encode(
-                            const JsonEncoder.withIndent('  ').convert(data),
-                          ),
-                          mimeType: 'application/json',
+                  final origin = box == null
+                      ? null
+                      : box.localToGlobal(Offset.zero) & box.size;
+                  await shareMemoryMarkdown(
+                    repository,
+                    isActive: () => mounted,
+                    share: (file) async {
+                      await SharePlus.instance.share(
+                        ShareParams(
+                          files: [XFile(file.path, mimeType: 'text/markdown')],
+                          fileNameOverrides: const ['nod-memory.md'],
+                          sharePositionOrigin: origin,
                         ),
-                      ],
-                      fileNameOverrides: const ['nod-memory.json'],
-                      sharePositionOrigin: box == null
-                          ? null
-                          : box.localToGlobal(Offset.zero) & box.size,
-                    ),
+                      );
+                    },
                   );
                 }),
-                child: const Text('Export JSON'),
+                child: const Text('Export Markdown'),
               ),
             ],
           ),
@@ -223,6 +227,18 @@ class _NodMemorySettingsPageState extends State<NodMemorySettingsPage> {
                             subtitle: Text(
                               '${source['channel'] ?? ''} ${source['at'] ?? ''}',
                             ),
+                            trailing:
+                                widget.onShowMessage != null &&
+                                    source['canOpenInCurrentChat'] == true &&
+                                    source['id'] is String &&
+                                    (source['id'] as String).isNotEmpty
+                                ? TextButton(
+                                    onPressed: () => widget.onShowMessage!(
+                                      source['id'] as String,
+                                    ),
+                                    child: const Text('Show message'),
+                                  )
+                                : null,
                           ),
                         Wrap(
                           children: [

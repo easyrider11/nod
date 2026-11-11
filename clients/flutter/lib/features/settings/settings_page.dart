@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -6,6 +8,7 @@ import '../../core/api_transport.dart';
 import '../../core/settings.dart';
 import 'memory_settings_page.dart';
 import 'model_settings_page.dart';
+import 'settings_media.dart';
 import 'settings_widgets.dart';
 
 class NodSettingsPage extends StatelessWidget {
@@ -13,9 +16,11 @@ class NodSettingsPage extends StatelessWidget {
     super.key,
     required this.transport,
     this.onThemeChanged,
+    this.onShowMessage,
   });
   final NodApiTransport transport;
   final ValueChanged<ThemeMode>? onThemeChanged;
+  final ValueChanged<String>? onShowMessage;
   @override
   Widget build(BuildContext context) {
     final repository = NodSettingsRepository(transport);
@@ -38,12 +43,17 @@ class NodSettingsPage extends StatelessWidget {
           ListTile(
             title: const Text('Voice & audio'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => open(_voice(repository)),
+            onTap: () => open(NodVoiceSettingsPage(repository: repository)),
           ),
           ListTile(
             title: const Text('Memory'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => open(NodMemorySettingsPage(repository: repository)),
+            onTap: () => open(
+              NodMemorySettingsPage(
+                repository: repository,
+                onShowMessage: onShowMessage,
+              ),
+            ),
           ),
           ListTile(
             title: const Text('Rules & task check-ins'),
@@ -223,7 +233,57 @@ Widget _rules(NodSettingsRepository repository) => SettingsSection(
   },
 );
 
-Widget _voice(NodSettingsRepository repository) => SettingsSection(
+class NodVoiceSettingsPage extends StatefulWidget {
+  const NodVoiceSettingsPage({
+    super.key,
+    required this.repository,
+    this.preview,
+  });
+  final NodSettingsRepository repository;
+  final SettingsVoicePreview? preview;
+  @override
+  State<NodVoiceSettingsPage> createState() => _NodVoiceSettingsPageState();
+}
+
+class _NodVoiceSettingsPageState extends State<NodVoiceSettingsPage>
+    with WidgetsBindingObserver {
+  late final preview =
+      widget.preview ?? SettingsVoicePreview(repository: widget.repository);
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) unawaited(preview.stop());
+  }
+
+  @override
+  void deactivate() {
+    unawaited(preview.stop());
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    preview.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: preview,
+    builder: (context, _) => _voice(widget.repository, preview),
+  );
+}
+
+Widget _voice(
+  NodSettingsRepository repository,
+  SettingsVoicePreview preview,
+) => SettingsSection(
   title: 'Voice & audio',
   load: repository.speech,
   builder: (context, data, state) {
@@ -264,11 +324,12 @@ Widget _voice(NodSettingsRepository repository) => SettingsSection(
         ),
         RadioGroup<String>(
           groupValue: data['speechVoice'] as String? ?? '',
-          onChanged: (value) => state.change(
-            () => repository.savePreferences({
+          onChanged: (value) => state.change(() async {
+            await preview.stop();
+            return repository.savePreferences({
               'speechVoice': value == '' ? null : value,
-            }),
-          ),
+            });
+          }),
           child: Column(
             children: [
               const RadioListTile(value: '', title: Text('Automatic voice')),
@@ -281,6 +342,35 @@ Widget _voice(NodSettingsRepository repository) => SettingsSection(
                   ),
                 ),
             ],
+          ),
+        ),
+        ListTile(
+          title: const Text('Voice preview'),
+          subtitle: Text(
+            preview.error ??
+                (preview.loading
+                    ? 'Preparing preview. Stop discards the result; the request is not retried.'
+                    : preview.playing
+                    ? 'Playing preview'
+                    : 'Hear the selected voice.'),
+          ),
+          trailing: TextButton.icon(
+            onPressed: preview.loading || preview.playing
+                ? preview.stop
+                : () => preview.start(
+                    data['speechVoice'] as String?,
+                    Localizations.localeOf(context).toLanguageTag(),
+                  ),
+            icon: Icon(
+              preview.loading || preview.playing
+                  ? Icons.stop
+                  : Icons.play_arrow,
+            ),
+            label: Text(
+              preview.loading || preview.playing
+                  ? 'Stop preview'
+                  : 'Preview voice',
+            ),
           ),
         ),
         if (data['voicesError'] != null)
@@ -317,7 +407,7 @@ Widget _voice(NodSettingsRepository repository) => SettingsSection(
         const ListTile(
           title: Text('Microphone'),
           subtitle: Text(
-            'Recording uses the system microphone. Grant microphone permission when recording in chat. Manage denied permission in device settings. Voice preview is not available here yet.',
+            'Recording uses the system microphone. Grant microphone permission when recording in chat. Manage denied permission in device settings.',
           ),
         ),
       ],
