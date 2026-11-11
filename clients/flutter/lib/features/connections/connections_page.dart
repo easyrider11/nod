@@ -175,136 +175,144 @@ class _NodConnectionsPageState extends State<NodConnectionsPage>
       ..._catalog.map((a) => a.slug),
     }.toList()..sort();
     final disabled = _busy || _loading;
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(24),
-        children: [
-          Text(
-            'Manage connections',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          const Text(
-            'Accounts and private configuration stay on your Nod server.',
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            children: [
-              OutlinedButton(
-                onPressed: disabled ? null : _mcp,
-                child: const Text('Connect MCP'),
-              ),
-              for (final provider in ['telegram', 'whatsapp'])
-                OutlinedButton(
-                  onPressed: disabled ? null : () => _channel(provider),
-                  child: Text(provider == 'telegram' ? 'Telegram' : 'WhatsApp'),
-                ),
-            ],
-          ),
-          for (final channel in _channels.where((channel) => channel.enabled))
-            ListTile(
-              title: Text(channel.provider),
-              subtitle: Text(
-                '${channel.values['accountName'] ?? channel.values['accountHandle'] ?? channel.values['mode'] ?? 'Connected'}${channel.managed ? ' · Server managed' : ''}',
-              ),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Accounts and channels')),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            Text(
+              'Manage connections',
+              style: Theme.of(context).textTheme.headlineMedium,
             ),
-          TextField(
-            decoration: const InputDecoration(labelText: 'Search apps'),
-            onChanged: (value) => setState(() => _query = value.toLowerCase()),
-          ),
-          if (_loading) const LinearProgressIndicator(),
-          if (_error != null) ...[
-            Semantics(liveRegion: true, child: Text(_error!)),
-            TextButton(onPressed: _load, child: const Text('Refresh')),
-          ],
-          for (final slug in slugs) ...[
-            if ([..._accounts, ..._catalog]
-                .where((a) => a.slug == slug)
-                .any(
-                  (a) => '${a.name} ${a.slug}'.toLowerCase().contains(_query),
-                ))
-              Builder(
-                builder: (context) {
-                  final accounts = _accounts
-                      .where((a) => a.slug == slug && a.id != null)
-                      .toList();
-                  final app = [
-                    ...accounts,
-                    ..._catalog.where((a) => a.slug == slug),
-                    ..._accounts.where((a) => a.slug == slug),
-                  ].first;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          app.name,
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        for (final account in accounts)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(account.account ?? account.name),
-                                Text(
-                                  account.disconnectPending
-                                      ? 'Removal pending'
-                                      : account.status,
-                                ),
-                                for (final path in account.paths)
+            const Text(
+              'Accounts and private configuration stay on your Nod server.',
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              children: [
+                OutlinedButton(
+                  onPressed: disabled ? null : _mcp,
+                  child: const Text('Connect MCP'),
+                ),
+                for (final provider in ['telegram', 'whatsapp'])
+                  OutlinedButton(
+                    onPressed: disabled ? null : () => _channel(provider),
+                    child: Text(
+                      provider == 'telegram' ? 'Telegram' : 'WhatsApp',
+                    ),
+                  ),
+              ],
+            ),
+            for (final channel in _channels.where((channel) => channel.enabled))
+              ListTile(
+                title: Text(channel.provider),
+                subtitle: Text(
+                  '${channel.values['accountName'] ?? channel.values['accountHandle'] ?? channel.values['mode'] ?? 'Connected'}${channel.managed ? ' · Server managed' : ''}',
+                ),
+              ),
+            TextField(
+              decoration: const InputDecoration(labelText: 'Search apps'),
+              onChanged: (value) =>
+                  setState(() => _query = value.toLowerCase()),
+            ),
+            if (_loading) const LinearProgressIndicator(),
+            if (_error != null) ...[
+              Semantics(liveRegion: true, child: Text(_error!)),
+              TextButton(onPressed: _load, child: const Text('Refresh')),
+            ],
+            for (final slug in slugs) ...[
+              if ([..._accounts, ..._catalog]
+                  .where((a) => a.slug == slug)
+                  .any(
+                    (a) => '${a.name} ${a.slug}'.toLowerCase().contains(_query),
+                  ))
+                Builder(
+                  builder: (context) {
+                    final accounts = _accounts
+                        .where((a) => a.slug == slug && a.id != null)
+                        .toList();
+                    final app = [
+                      ...accounts,
+                      ..._catalog.where((a) => a.slug == slug),
+                      ..._accounts.where((a) => a.slug == slug),
+                    ].first;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            app.name,
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          for (final account in accounts)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(account.account ?? account.name),
                                   Text(
-                                    '${path['kind']}: ${path['endpoint'] ?? ''}',
+                                    account.disconnectPending
+                                        ? 'Removal pending'
+                                        : account.status,
                                   ),
-                                Wrap(
-                                  spacing: 8,
-                                  children: [
-                                    if (account.canReconnect)
-                                      OutlinedButton(
+                                  for (final path in account.paths)
+                                    Text(
+                                      '${path['kind']}: ${path['endpoint'] ?? ''}',
+                                    ),
+                                  Wrap(
+                                    spacing: 8,
+                                    children: [
+                                      if (account.canReconnect)
+                                        OutlinedButton(
+                                          onPressed:
+                                              disabled ||
+                                                  account.disconnectPending
+                                              ? null
+                                              : () => _connect(account),
+                                          child: const Text('Reconnect'),
+                                        ),
+                                      TextButton(
                                         onPressed:
                                             disabled ||
                                                 account.disconnectPending
                                             ? null
-                                            : () => _connect(account),
-                                        child: const Text('Reconnect'),
+                                            : () => _remove(account),
+                                        child: const Text('Disconnect'),
                                       ),
-                                    TextButton(
-                                      onPressed:
-                                          disabled || account.disconnectPending
-                                          ? null
-                                          : () => _remove(account),
-                                      child: const Text('Disconnect'),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          OutlinedButton(
+                            onPressed:
+                                disabled || app.status == 'not_configured'
+                                ? null
+                                : () => _connect(
+                                    app,
+                                    additional: accounts.isNotEmpty,
+                                  ),
+                            child: Text(
+                              accounts.isEmpty ? 'Connect' : 'Add account',
                             ),
                           ),
-                        OutlinedButton(
-                          onPressed: disabled || app.status == 'not_configured'
-                              ? null
-                              : () => _connect(
-                                  app,
-                                  additional: accounts.isNotEmpty,
-                                ),
-                          child: Text(
-                            accounts.isEmpty ? 'Connect' : 'Add account',
-                          ),
-                        ),
-                        if (app.status == 'not_configured')
-                          const Text(
-                            'Sign-in unavailable. Check the server configuration.',
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                          if (app.status == 'not_configured')
+                            const Text(
+                              'Sign-in unavailable. Check the server configuration.',
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

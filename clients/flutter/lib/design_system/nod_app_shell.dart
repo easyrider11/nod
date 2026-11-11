@@ -354,19 +354,25 @@ class _DesktopSidebar extends StatelessWidget {
               ),
             ),
             const SizedBox(height: NodSpacing.xl),
-            for (var index = 0; index < destinations.length; index++) ...[
-              FocusTraversalOrder(
-                order: NumericFocusOrder(index.toDouble()),
-                child: _DesktopNavigationItem(
-                  destination: destinations[index],
-                  selected: selectedIndex == index,
-                  onTap: () => onDestinationSelected(index),
-                ),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  for (var index = 0; index < destinations.length; index++) ...[
+                    FocusTraversalOrder(
+                      order: NumericFocusOrder(index.toDouble()),
+                      child: _DesktopNavigationItem(
+                        destination: destinations[index],
+                        selected: selectedIndex == index,
+                        onTap: () => onDestinationSelected(index),
+                      ),
+                    ),
+                    if (index != destinations.length - 1)
+                      const SizedBox(height: NodSpacing.xxs),
+                  ],
+                ],
               ),
-              if (index != destinations.length - 1)
-                const SizedBox(height: NodSpacing.xxs),
-            ],
-            const Spacer(),
+            ),
             if (onLogOut != null) ...[
               const Divider(),
               Material(
