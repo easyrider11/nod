@@ -9,17 +9,134 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nod_client/core/api_transport.dart';
 import 'package:nod_client/core/attachments.dart';
 import 'package:nod_client/core/core.dart';
+import 'package:nod_client/core/private_requests.dart';
 import 'package:nod_client/core/rich_results.dart' as results;
 import 'package:nod_client/design_system/design_system.dart';
 import 'package:nod_client/features/chat/agent_message_body.dart';
 import 'package:nod_client/features/chat/chat.dart';
 import 'package:nod_client/features/chat/chat_testing.dart';
 import 'package:nod_client/features/connections/connection_setup_page.dart';
+import 'package:nod_client/features/private_requests/private_browser.dart';
 import 'package:nod_client/features/private_requests/private_requests_page.dart';
 import 'package:nod_client/features/results/rich_result.dart';
 import 'package:nod_client/motion/motion.dart';
 
 void main() {
+  for (final kind in ['credentials', 'payments']) {
+    testWidgets(
+      'older focused $kind link opens exact private form absent from recent state',
+      (tester) async {
+        final id = kind == 'credentials'
+            ? 'a' * 43
+            : 'c5ed5115-813d-4d3d-a6ce-94b6d36ce004';
+        final backend = FakeNodRepository(
+          state: const NodState(
+            threadId: 'current-thread',
+            messages: [],
+            turn: NodTurnState.idle,
+            revision: '1',
+          ),
+        );
+        addTearDown(backend.dispose);
+        final repository = _PrivateLinkRepository(backend)
+          ..contextMessages = [
+            NodMessage(
+              id: 'older-private',
+              turnId: 'older-task-turn',
+              role: NodMessageRole.assistant,
+              text: '[Open private form](</$kind/$id>)',
+              createdAt: DateTime(2026),
+            ),
+          ];
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: NodTheme.light,
+            home: Scaffold(
+              body: NodChat(
+                repository: repository,
+                focusMessageId: 'older-private',
+                replyToFocusedMessage: false,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect((await repository.loadState()).messages, isEmpty);
+        await tester.tap(find.text('Open private form', findRichText: true));
+        await tester.pumpAndSettle();
+        final entry = tester.widget<NodPrivateEntry>(
+          find.byType(NodPrivateEntry),
+        );
+        expect(entry.request.id, id);
+        expect(
+          repository.reads,
+          contains(
+            '/api/${kind == 'credentials' ? 'credential' : 'payment'}-requests/$id${kind == 'payments' ? '/status' : ''}',
+          ),
+        );
+        expect(backend.sentTexts, isEmpty);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
+  testWidgets(
+    'older focused task browser uses exact context turn absent from recent state',
+    (tester) async {
+      const turnId = 'c5ed5115-813d-4d3d-a6ce-94b6d36ce004';
+      final backend = FakeNodRepository(
+        state: const NodState(
+          threadId: 'current-thread',
+          messages: [],
+          turn: NodTurnState.idle,
+          revision: '1',
+        ),
+      );
+      addTearDown(backend.dispose);
+      final repository = _PrivateLinkRepository(backend)
+        ..contextMessages = [
+          NodMessage(
+            id: 'older-handoff',
+            turnId: turnId,
+            role: NodMessageRole.assistant,
+            text: 'Finish the synthetic step in my browser.',
+            createdAt: DateTime(2026),
+          ),
+        ];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: NodTheme.light,
+          home: Scaffold(
+            body: NodChat(
+              repository: repository,
+              focusMessageId: 'older-handoff',
+              replyToFocusedMessage: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect((await repository.loadState()).messages, isEmpty);
+      expect(
+        find.text('Finish the synthetic step in my browser.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Open task browser'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<NodPrivateBrowser>(find.byType(NodPrivateBrowser)).turnId,
+        turnId,
+      );
+      expect(repository.browserTurns, [turnId]);
+      expect(backend.sentTexts, isEmpty);
+      expect(
+        repository.reads.where((path) => path.contains('browser-handoff')),
+        isEmpty,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets(
     'discovered connection Markdown opens authenticated setup with exact proposal and display name',
     (tester) async {
@@ -1522,10 +1639,26 @@ Future<void> _pumpChat(
   }
 }
 
-class _PrivateLinkRepository implements NodRepository, NodApiTransport {
+class _PrivateLinkRepository
+    implements
+        NodRepository,
+        NodApiTransport,
+        NodMessageFocusRepository,
+        NodPrivateBrowserTransport {
   _PrivateLinkRepository(this.backend);
   final FakeNodRepository backend;
   final List<String> reads = [];
+  List<NodMessage> contextMessages = const [];
+  final List<String> browserTurns = [];
+  @override
+  Future<List<NodMessage>> loadMessageContext(String messageId) async =>
+      contextMessages.where((message) => message.id == messageId).toList();
+  @override
+  Stream<List<int>> browserHandoffFrames(String turnId) {
+    browserTurns.add(turnId);
+    return const Stream.empty();
+  }
+
   @override
   Stream<NodConnectionState> get connectionStates => backend.connectionStates;
   @override

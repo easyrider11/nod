@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 
 import '../../api/connections_management_repository.dart';
+import '../../api/private_requests_repository.dart';
 import '../../core/api_transport.dart';
 import '../../core/app_connections.dart';
 import '../../core/attachments.dart';
@@ -19,6 +20,7 @@ import '../../design_system/design_system.dart';
 import '../../motion/motion.dart';
 import '../apps/apps_page.dart';
 import '../connections/connection_setup_page.dart';
+import '../private_requests/private_browser.dart';
 import '../private_requests/private_requests_page.dart';
 import '../results/artifact_preview.dart';
 import '../results/rich_result.dart';
@@ -816,6 +818,27 @@ class _Conversation extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              if (message.id == focusMessageId &&
+                  message.role == NodMessageRole.assistant &&
+                  message.turnId != null &&
+                  controller.transport != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.open_in_browser),
+                    label: const Text('Open task browser'),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => NodPrivateBrowser(
+                          repository: NodPrivateRequestsRepository(
+                            controller.transport!,
+                          ),
+                          turnId: message.turnId!,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               if (controller.hasChoices(message))

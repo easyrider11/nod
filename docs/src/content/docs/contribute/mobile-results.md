@@ -11,7 +11,7 @@ Chart results show a graphic and their exact series values, including negative v
 
 Flights, bookings, seats, and diagrams show structured details. Booking status, operating carrier, time zones, connection risks, seat availability, coverage, and source links remain separate fields. These cards don't book or change anything. Flight and booking options aren't treated as confirmed purchases.
 
-App suggestions offer **Connect in Apps**. A discovered service's setup link opens its authenticated native setup page. Private sign-in and payment links open the existing private request page, not an unauthenticated external browser.
+App suggestions offer **Connect in Apps**. A discovered service's setup link opens its authenticated native setup page. Private sign-in and payment links open the existing private request page, not an unauthenticated external browser. A focused task message also offers **Open task browser**, bound to that message's turn. This works when the task is outside the recent-state window. The server still checks whether its handoff is active; an ended handoff can't open a replacement task's browser.
 
 ## Reply and react
 
