@@ -118,6 +118,10 @@ The network has no internet access, and your source folders are mounted read-onl
 
 Wait for a controlled frame to finish loading before checking an old control binding. A reload can still show the previous document while navigation is pending.
 
+## Manual acceptance harness
+
+[`scripts/e2e-nod.ts`](https://github.com/n8n-io/nod/blob/main/scripts/e2e-nod.ts) runs manual scenarios with a configured model key, disposable local database schema, and isolated browser and workspace containers. The harness supplies memory and classification curators. Its onboarding and trust reviews use the selected model at its lightest effort, as production does. You can check typed approval, decline, and expiry through the configured application path. Automated tests use synthetic curators and actions. They never call a live model or connected account.
+
 ## Mac guest protection
 
 Run this check on a Mac with Docker running. It creates a disposable Lima VM from a prepared runtime pack. It tests normal startup, stacked AppArmor signals, mount restrictions, and PostgreSQL data after a restart with the old profile restored. It does not use your Nod profile or connected accounts. The check needs 3 GiB of VM memory. It stops the VM before deleting its files. If the VM cannot stop, the check keeps its control files for recovery.

@@ -368,6 +368,7 @@ try {
     { createApplication },
     { pool },
     { createPiAgent },
+    { createE2eCurators },
     { createContainerBrowserComputer },
     { createDockerWorkspace },
     { createPublicLinkPreviewProvider },
@@ -376,6 +377,7 @@ try {
     import('../src/server/composition.ts'),
     import('../src/server/db.ts'),
     import('../src/providers/pi/index.ts'),
+    import('./e2e-curators.ts'),
     import('../src/providers/container-browser/index.ts'),
     import('../src/providers/docker/index.ts'),
     import('../src/providers/public-web/link-preview.ts'),
@@ -387,6 +389,7 @@ try {
     throw new Error('Speech is disabled in this acceptance harness.');
   };
   application = await createApplication({
+    ...createE2eCurators({ provider, model, apiKey }),
     agent: createPiAgent({
       provider,
       model,

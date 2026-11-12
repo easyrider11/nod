@@ -18,6 +18,7 @@ import test from 'node:test';
 import Fastify from 'fastify';
 import pg from 'pg';
 import type { ProductAnalytics } from '../src/ports/analytics.ts';
+import type { MemoryCurator } from '../src/ports/memory-curator.ts';
 import { createAnalytics, snapshotAnalytics } from '../src/server/analytics.ts';
 import {
   accessCookie,
@@ -30,6 +31,8 @@ import type { ApprovalDescription, ApprovalExecutionContext } from '../src/serve
 import { serverNetwork } from '../src/server/network.ts';
 import { approvalContent, approvalTitle } from '../src/server/action-presentation.ts';
 import { createCommunication } from '../src/server/communication.ts';
+import { createE2eCurators } from '../scripts/e2e-curators.ts';
+import { createPiMemoryCurator } from '../src/providers/pi/memory-curator.ts';
 
 test('confirmation repair keeps action facts fixed and requires a new independent check', async () => {
   const data = {
@@ -647,6 +650,7 @@ test(
       await db.initializeDatabase();
       await thread.initializeThreads();
       await personal.initialize({ workers: false });
+      let answerReply = (reply: string) => trust.answer(reply);
       const approved = await createApprovals(
         async (action, args, context) => {
           calls.push({ action, args, context });
@@ -659,7 +663,7 @@ test(
           if (rejectPreflight)
             throw Object.assign(new Error('Fixture account disconnected.'), { statusCode: 409 });
         },
-        (reply) => trust.answer(reply),
+        (reply) => answerReply(reply),
         async (proposal, signal) => {
           if (descriptionFailure) throw new Error('Synthetic confirmation model failure.');
           return describe(proposal, signal);
@@ -752,6 +756,79 @@ test(
           };
         },
       });
+      await t.test(
+        'e2e curators classify typed approval replies without a live model',
+        async (t) => {
+          const original = answerReply;
+          t.after(() => {
+            answerReply = original;
+          });
+          const keyless = createPiMemoryCurator({ provider: 'openai' });
+          assert.equal(keyless.configured, false);
+          const harness = createE2eCurators(
+            { provider: 'openai', model: 'gpt-6.1-sol', apiKey: 'synthetic-e2e-key' },
+            (options) => ({
+              id: options.model ?? 'synthetic-helper',
+              configured: true,
+              curate: async ({ task, input }) => {
+                assert.equal(task, 'review');
+                if (options.model !== 'gpt-6.1-sol' || options.lightest !== true) return undefined;
+                const reply = (input as { reply?: unknown }).reply;
+                return { answer: reply === 'Yes' ? 'yes' : reply === 'No' ? 'no' : 'other' };
+              },
+            }),
+          );
+          const reviewer = (curator: MemoryCurator) =>
+            createTrust({
+              pool: db.pool,
+              ownerId,
+              review: (instructions, input, signal) =>
+                curator.configured
+                  ? curator.curate({ task: 'review', instructions, input }, signal)
+                  : Promise.resolve(undefined),
+            });
+          const pending = async (label: string) => {
+            const turn = await begin(`Synthetic e2e ${label} confirmation`);
+            const id = await propose(turn, 'NOD_notification_preferences_update', {
+              notificationRule: `Synthetic e2e ${label}`,
+            });
+            await finish(turn.turnId);
+            return id;
+          };
+          const keylessTrust = reviewer(keyless);
+          const helperTrust = reviewer(harness.classificationCurator);
+          const harnessTrust = reviewer(harness.onboardingCurator);
+          const callsBefore = calls.length;
+          answerReply = (reply) => keylessTrust.answer(reply);
+          const beforeYes = await pending('keyless Yes');
+          await confirm(beforeYes, true);
+          const beforeNo = await pending('keyless No');
+          await confirm(beforeNo, false);
+          assert.equal((await stored(beforeYes)).status, 'expired');
+          assert.equal((await stored(beforeNo)).status, 'expired');
+          answerReply = (reply) => helperTrust.answer(reply);
+          const wrongModel = await pending('helper Yes');
+          await confirm(wrongModel, true);
+          assert.equal((await stored(wrongModel)).status, 'expired');
+          assert.equal(calls.length, callsBefore);
+          answerReply = (reply) => harnessTrust.answer(reply);
+          const afterYes = await pending('selected Yes');
+          await confirm(afterYes, true);
+          assert.equal((await stored(afterYes)).status, 'confirmed');
+          await execute(afterYes);
+          assert.equal((await stored(afterYes)).status, 'completed');
+          assert.equal(calls.length, callsBefore + 1);
+          await finish((await stored(afterYes)).execution_turn_id, 'succeeded');
+          const afterNo = await pending('selected No');
+          await confirm(afterNo, false);
+          assert.equal((await stored(afterNo)).status, 'declined');
+          assert.equal(calls.length, callsBefore + 1);
+          await finish((await stored(afterNo)).execution_turn_id, 'succeeded');
+          const afterOther = await pending('selected Maybe');
+          await confirm(afterOther, true, { text: 'Maybe' });
+          assert.equal((await stored(afterOther)).status, 'expired');
+        },
+      );
       const compareVerdict = (
         verdict: Awaited<ReturnType<typeof trust.check>>,
         expected: Record<string, unknown>,
