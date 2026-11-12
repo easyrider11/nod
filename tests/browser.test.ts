@@ -4413,6 +4413,15 @@ test('composer preserves keyboard shortcuts, upload retries, previews and failed
             await assertVisiblePaste(sent, literalPaste);
           }
         }
+        const atLimitPaste = 'x'.repeat(100_000);
+        await act(async () => replaceText(''));
+        await paste(atLimitPaste);
+        await settle(() => currentText.length === 100_000);
+        assert.equal(document.querySelector('[aria-label="Send message"]').disabled, false);
+        const sentBeforeAtLimit = sends.length;
+        await submit();
+        assert.equal(sends.length, sentBeforeAtLimit + 1);
+        assert.equal(sends.at(-1).text, atLimitPaste);
         const longPaste = 'name;email\n' + 'x'.repeat(100_001 - 'name;email\n'.length);
         await act(async () => replaceText(''));
         await paste(longPaste);

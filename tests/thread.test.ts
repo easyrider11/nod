@@ -830,6 +830,15 @@ test(
           });
           assert.equal(overText.statusCode, 400);
           assert.equal(overText.json().code, 'message_too_long');
+          const overAudioText = await isolated.inject(
+            audioRequest({
+              text: 'x'.repeat(100_001),
+              clientMessageId: randomUUID(),
+              threadId: randomUUID(),
+            }),
+          );
+          assert.equal(overAudioText.statusCode, 400);
+          assert.equal(overAudioText.json().code, 'message_too_long');
           assert.equal(
             (
               await isolated.inject({
@@ -2992,6 +3001,21 @@ test(
           );
         },
       );
+
+      await t.test('voice transcript overflow rejects without saving a message', async () => {
+        const clientMessageId = randomUUID();
+        const response = await sendAudio({
+          threadId,
+          clientMessageId,
+          text: 'x'.repeat(99_990),
+        });
+        assert.equal(response.statusCode, 400, response.body);
+        assert.equal(response.json().code, 'message_too_long');
+        assert.equal(
+          (await db.pool.query('SELECT 1 FROM messages WHERE id=$1', [clientMessageId])).rowCount,
+          0,
+        );
+      });
 
       await t.test(
         'native audio reads only attached recordings in the active owned turn',

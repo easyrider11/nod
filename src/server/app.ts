@@ -262,11 +262,14 @@ export async function createApp(dependencies: AppDependencies = {}) {
         : undefined;
     const status = error instanceof z.ZodError ? 400 : known?.statusCode || 500;
     const messageTooLong =
-      request.routeOptions.url === '/api/messages' &&
-      error instanceof z.ZodError &&
-      error.issues.some(
-        (issue) => issue.code === 'too_big' && issue.path.length === 1 && issue.path[0] === 'text',
-      );
+      (request.routeOptions.url === '/api/messages' ||
+        request.routeOptions.url === '/api/messages/audio') &&
+      (known?.code === 'message_too_long' ||
+        (error instanceof z.ZodError &&
+          error.issues.some(
+            (issue) =>
+              issue.code === 'too_big' && issue.path.length === 1 && issue.path[0] === 'text',
+          )));
     if (status >= 500)
       logFailure('request_failed', error, {
         method: request.method,
