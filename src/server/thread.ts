@@ -170,6 +170,7 @@ export interface ThreadDependencies {
   ) => Promise<void>;
   spendingLimit?: () => Promise<{ monthlyUsd: number } | null>;
   checkIn?: (sessionId: string, turnId: string) => Promise<RuntimeContext['checkIn']>;
+  scheduleCache?: (turnId: string) => Promise<RuntimeContext['scheduleCache']>;
   skipTurn?: (sourceId: string) => Promise<boolean>;
   accountProfile?: () => Promise<RuntimeContext['account']>;
   connectedApps?: () => Promise<NonNullable<RuntimeContext['connectedApps']>>;
@@ -1932,6 +1933,8 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
       mode: (await dependencies.audioReplies?.()) ?? defaultPreferences.speechReply,
       available: Boolean(dependencies.speech.configured),
     };
+    const scheduleCache =
+      turn.source === 'schedule' ? await dependencies.scheduleCache?.(turnId) : undefined;
     const result = await dependencies.runTurn({
       threadId,
       turnId,
@@ -1939,6 +1942,7 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
       resumed: turn.source === 'resume' || Boolean(turn.parent_turn_id),
       prompt: turn.prompt,
       background: turn.background,
+      ...(scheduleCache ? { scheduleCache } : {}),
       channel: String(turn.channel).split(':')[0],
       ...loaded.context,
       speech,
