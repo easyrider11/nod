@@ -549,6 +549,20 @@ test(
             'The year is 2026',
           ];
           for (const text of unrelated) assert.equal((await send(text)).statusCode, 200, text);
+          const wrappedCodes = ['my code is 1234', 'Code: 123', 'O código é 739', 'pin 8421'];
+          for (const text of wrappedCodes) {
+            const response = await send(text);
+            assert.equal(response.statusCode, 409, text);
+            assert.ok(!response.body.includes(text));
+          }
+          assert.deepEqual(ordinary, unrelated);
+          assert.deepEqual(entered, []);
+          assert.equal(
+            (await db.pool.query('SELECT text FROM messages WHERE role=$1', ['user'])).rows.some(
+              ({ text }: { text: string }) => wrappedCodes.includes(text),
+            ),
+            false,
+          );
           const earlierTurn = randomUUID();
           const earlierMessage = randomUUID();
           await db.pool.query(
@@ -606,6 +620,8 @@ test(
           );
           assert.equal((await send('739')).statusCode, 409);
           assert.equal((await send('73951')).statusCode, 409);
+          assert.equal((await send('my code is 739')).statusCode, 409);
+          assert.equal((await send('Code: 739')).statusCode, 409);
           const question = 'What was invoice NS-1043 for?';
           assert.equal((await send(question)).statusCode, 200);
           assert.deepEqual(ordinary, [question]);

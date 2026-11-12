@@ -40,6 +40,15 @@ function conflict(message: string) {
   return Object.assign(new Error(message), { statusCode: 409 });
 }
 
+function codeBearingPaymentReply(text: string) {
+  return (
+    /(?<!\d)\d{3,4}(?!\d)/u.test(text) &&
+    /(?<![\p{L}\p{N}])(?:code|c[oó]digo|pin|otp|passcode|verification|cvv|cvc)(?![\p{L}\p{N}])/iu.test(
+      text,
+    )
+  );
+}
+
 export async function createChatVerification(
   pool: Pool,
   options: {
@@ -137,7 +146,14 @@ export async function createChatVerification(
       otp: reply.kind === 'code' ? reply.code : undefined,
       payment: options.submitPayment ? securityCodeIn(text) : undefined,
     };
-    if (reply.kind === 'ordinary' && !codes.payment && !input.verificationRequestId) return;
+    const paymentCodeLike = options.submitPayment && codeBearingPaymentReply(text);
+    if (
+      reply.kind === 'ordinary' &&
+      !codes.payment &&
+      !paymentCodeLike &&
+      !input.verificationRequestId
+    )
+      return;
     if (!codes.otp && !codes.payment && input.verificationRequestId)
       throw conflict('Send the code by itself.');
     const incompatible = Boolean(input.attachmentIds?.length);
@@ -263,10 +279,12 @@ export async function createChatVerification(
               options.ownerId,
               channel,
               thread.id,
-              Boolean(codes.payment),
+              Boolean(codes.payment || paymentCodeLike),
               reply.kind !== 'ordinary',
               turnId ?? null,
-              reply.kind === 'code' || reply.kind === 'wrapped' || Boolean(codes.payment),
+              reply.kind === 'code' ||
+                reply.kind === 'wrapped' ||
+                Boolean(codes.payment || paymentCodeLike),
               reply.kind === 'code',
             ],
           )
@@ -289,7 +307,13 @@ export async function createChatVerification(
         );
       const request = requests.rows[0]!;
       const code = codes[request.kind];
-      if (!code && request.kind === 'payment' && !requestId && reply.kind !== 'code') {
+      if (
+        !code &&
+        request.kind === 'payment' &&
+        !requestId &&
+        reply.kind !== 'code' &&
+        !paymentCodeLike
+      ) {
         await input.persistOrdinary?.(client);
         await client.query('COMMIT');
         return;
