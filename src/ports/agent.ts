@@ -8,6 +8,7 @@ import type { BrowserAction, BrowserPage, CredentialKind, WorkspaceSession } fro
 import type {
   AgentReactionResult,
   Artifact,
+  CredentialRequest,
   MessageReaction,
   SpeechReplyMode,
 } from '../shared/contracts.ts';
@@ -165,6 +166,9 @@ export interface RuntimeContext {
   previousFailure?: string;
   withdrawnRequest?: 'stopped' | 'failed';
   confirmedActions?: string[];
+  credentialRequests?: Array<
+    Pick<CredentialRequest, 'turnId' | 'origin' | 'label' | 'kind' | 'status'>
+  >;
   taskContext?: {
     id: string;
     title: string;
