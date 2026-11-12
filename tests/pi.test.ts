@@ -1938,7 +1938,7 @@ test('task handoff does not repeat acknowledgements and keeps independent final 
       earlyUpdate: true,
       steer: false,
       final:
-        "I've started reviewing your synthetic inbox. I'll flag urgent messages and save draft replies. Nothing gets sent without your OK.",
+        "I've started reviewing your synthetic inbox. I'll save draft replies and flag urgent email. Nothing gets sent without your OK.",
       expected: [acknowledgement],
     },
     {
@@ -2013,6 +2013,15 @@ test('task handoff does not repeat acknowledgements and keeps independent final 
       expected: ["I've started reviewing your synthetic inbox and will flag fraudulent messages."],
     },
     {
+      name: 'finding borrowed from the owner request',
+      earlyUpdate: false,
+      steer: false,
+      prompt: 'Check the synthetic invoices and tell me which are rejected.',
+      start: "I've started checking the synthetic invoices. Every invoice is approved.",
+      final: "I've started checking the synthetic invoices. Every invoice is rejected.",
+      expected: ["I've started checking the synthetic invoices. Every invoice is rejected."],
+    },
+    {
       name: 'steered answer',
       earlyUpdate: true,
       steer: true,
@@ -2079,7 +2088,10 @@ test('task handoff does not repeat acknowledgements and keeps independent final 
         const result = await runtime.runTurn({
           ...context(directory),
           turnId: randomUUID(),
-          prompt: 'Review my synthetic inbox and report urgent messages.',
+          prompt:
+            'prompt' in scenario
+              ? scenario.prompt
+              : 'Review my synthetic inbox and report urgent messages.',
           task: async () => ({ id: randomUUID() }),
           reply: async (text) => {
             posted.push(text);

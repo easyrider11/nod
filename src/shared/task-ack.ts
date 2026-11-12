@@ -19,16 +19,14 @@ function overlap(text: string, start: string, shorter: number, longer: number, m
   );
 }
 
-function addsNewContent(text: string, start: string, request: string) {
+function addsNewContent(text: string, start: string) {
   const finalWords = words(text);
   const startWords = words(start);
-  const requestWords = words(request);
   const removed = [...startWords].filter((word) => !finalWords.has(word));
   return [...finalWords]
     .filter((word) => !startWords.has(word))
     .some(
       (word) =>
-        !requestWords.has(word) &&
         !removed.some((old) => {
           const stem = Math.min(word.length, old.length) - 2;
           return stem >= 3 && word.slice(0, stem) === old.slice(0, stem);
@@ -123,7 +121,7 @@ export function resemblesTaskAcknowledgement(text: string, start: string) {
   );
 }
 
-export function repeatsTaskStart(text: string, start: string, request: string) {
+export function repeatsTaskStart(text: string, start: string) {
   const details = text.match(/https?:\/\/\S+|[€$£]\s*\d[\d.,]*|\b\d[\d.,]*\b/gu) ?? [];
   const startDetails = new Map<string, number>();
   for (const detail of start.match(/https?:\/\/\S+|[€$£]\s*\d[\d.,]*|\b\d[\d.,]*\b/gu) ?? [])
@@ -137,7 +135,7 @@ export function repeatsTaskStart(text: string, start: string, request: string) {
       return true;
     }) &&
     polarity(text) === polarity(start) &&
-    !addsNewContent(text, start, request) &&
+    !addsNewContent(text, start) &&
     (overlap(text, start, 0.8, 0.85, 5) || nearDuplicate(text, start))
   );
 }

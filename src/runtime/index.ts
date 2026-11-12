@@ -1090,7 +1090,7 @@ export function createAgentRuntime(dependencies: {
               taskStart?.revision === requestRevision &&
               !replyOwed &&
               [taskStart.message, taskStart.previousReply].some((message) =>
-                repeatsTaskStart(event.text, message, context.prompt),
+                repeatsTaskStart(event.text, message),
               )
             )
               streamSubmitted = true;
