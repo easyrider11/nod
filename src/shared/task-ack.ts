@@ -110,14 +110,14 @@ function polarity(text: string) {
     .join('|');
 }
 
-export function resemblesTaskAcknowledgement(text: string, start: string) {
+export function resemblesTaskAcknowledgement(text: string, start: string, handoff = false) {
   const status =
     /^(?:(?:sure|ok(?:ay)?)[,.!\s]+)?(?:on it\b|i(?:['’]ll| will)\b|i(?:['’]m| am)\s+(?:going|working|starting)\b|i(?:['’]ve| have)\s+started\b|started\b|working\b)/iu.test(
       text.trim(),
     );
   return (
     !/[\p{N}€$£\n]|https?:\/\//iu.test(text) &&
-    (status ? overlap(text, start, 0.45, 0.4, 3) : nearDuplicate(text, start))
+    (status ? overlap(text, start, 0.45, 0.4, 3) : handoff && nearDuplicate(text, start))
   );
 }
 

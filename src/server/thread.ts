@@ -188,6 +188,7 @@ export interface ThreadDependencies {
     input: unknown,
     sourceMessageId: string | null,
     priorMessageId?: string,
+    priorHandoff?: boolean,
   ) => Promise<unknown>;
   taskContext?: (turn: TurnRef) => Promise<RuntimeContext['taskContext']>;
   settleTask?: (turn: TurnRef, result: string) => Promise<void>;
@@ -1686,13 +1687,19 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
   let explicitAudio = false;
   const published = new Map<string, Artifact>();
   let sourceMessageId: string | null = null;
-  const plainReplies: Array<{ id: string; text: string; sourceMessageId: string | null }> = [];
+  const plainReplies: Array<{
+    id: string;
+    text: string;
+    sourceMessageId: string | null;
+    handoff: boolean;
+  }> = [];
   const post = async (
     text: string,
     attachments: Artifact[] = [],
     streamId?: string,
     replyToMessageId?: string,
     presentation?: Presentation,
+    handoff = false,
   ) => {
     const source = text;
     const postedFor = sourceMessageId;
@@ -1747,7 +1754,7 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
       const spoken = presentation && !text.trim() ? presentationText(presentation) : text;
       if (spoken.trim()) replies.push({ id, text: spoken, source });
       if (plain && spoken.trim())
-        plainReplies.push({ id, text: spoken, sourceMessageId: postedFor });
+        plainReplies.push({ id, text: spoken, sourceMessageId: postedFor, handoff });
     } catch (error) {
       if (rolledBack) await Promise.allSettled(cleanup.map((remove) => remove()));
       throw error;
@@ -1991,9 +1998,9 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
         return bytes;
       },
       emit,
-      reply: async (text, streamId, replyToMessageId, presentation) => {
+      reply: async (text, streamId, replyToMessageId, presentation, handoff) => {
         const pending = shared.slice();
-        await post(text, pending, streamId, replyToMessageId, presentation);
+        await post(text, pending, streamId, replyToMessageId, presentation, handoff);
         shared.splice(0, pending.length);
       },
       delta: (text, streamId, done) => {
@@ -2069,11 +2076,8 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
       ),
       task:
         dependencies.task &&
-        fenced((input) =>
-          dependencies.task!(
-            ref,
-            input,
-            sourceMessageId,
+        fenced((input) => {
+          const prior =
             (input as { action?: unknown })?.action === 'start' && sourceMessageId
               ? plainReplies.findLast(
                   (reply) =>
@@ -2081,11 +2085,12 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
                     resemblesTaskAcknowledgement(
                       reply.text,
                       (input as { message?: string }).message ?? '',
+                      reply.handoff,
                     ),
-                )?.id
-              : undefined,
-          ),
-        ),
+                )
+              : undefined;
+          return dependencies.task!(ref, input, sourceMessageId, prior?.id, prior?.handoff);
+        }),
       takeMessages:
         turn.background && !taskContext
           ? undefined

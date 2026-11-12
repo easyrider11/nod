@@ -359,6 +359,7 @@ export function createTasks(options: {
     sourceMessageId?: string | null,
     capture?: CaptureAnalytics,
     priorMessageId?: string,
+    priorHandoff = false,
   ) {
     const request = input.parse(raw);
     if (request.action === 'list') return { tasks: await read(client) };
@@ -436,7 +437,7 @@ export function createTasks(options: {
           : undefined;
       const messageId = current.proactive
         ? null
-        : prior && resemblesTaskAcknowledgement(prior.text, request.message)
+        : prior && resemblesTaskAcknowledgement(prior.text, request.message, priorHandoff)
           ? prior.id
           : await insertAssistantMessage(client, turn, request.message);
       const sessionId = independent ? id : current.session_id;
@@ -834,13 +835,14 @@ export function createTasks(options: {
     raw: unknown,
     sourceMessageId: string | null,
     priorMessageId?: string,
+    priorHandoff?: boolean,
   ) {
     const capture = snapshotAnalytics(options.analytics);
     const result = await transaction(async (client) => {
       await lockThread(client);
       return withTurnLock(
         turn.turnId,
-        () => act(client, turn, raw, sourceMessageId, capture, priorMessageId),
+        () => act(client, turn, raw, sourceMessageId, capture, priorMessageId, priorHandoff),
         client,
       );
     }, pool);

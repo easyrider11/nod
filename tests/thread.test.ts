@@ -2055,6 +2055,7 @@ test(
               prompt: 'Revisa el buzón sintético y prepara borradores.',
               prior:
                 'Ya estoy revisando tu buzón y preparando borradores de respuesta. No enviaré nada sin tu aprobación.',
+              handoff: true,
               start:
                 'Ya he empezado a revisar tu buzón y preparar borradores de respuesta. No enviaré nada sin tu aprobación.',
               expected: [
@@ -2080,6 +2081,16 @@ test(
               expected: ['I found urgent synthetic inbox messages and flagged them.', startMessage],
               anchor: 1,
             },
+            {
+              prompt: 'Check the synthetic invoice due Friday.',
+              prior: 'No, the synthetic invoice is due Friday.',
+              start: 'Check the synthetic invoice due Friday.',
+              expected: [
+                'No, the synthetic invoice is due Friday.',
+                'Check the synthetic invoice due Friday.',
+              ],
+              anchor: 1,
+            },
           ] as const;
           const started = new Map<string, Task>();
           inspectObserver = async (context) => {
@@ -2095,7 +2106,13 @@ test(
               });
               return { status: 'succeeded' };
             }
-            await context.reply(scenario.prior);
+            await context.reply(
+              scenario.prior,
+              undefined,
+              undefined,
+              undefined,
+              'handoff' in scenario && scenario.handoff,
+            );
             if ('between' in scenario) await context.reply(scenario.between);
             started.set(
               context.prompt,

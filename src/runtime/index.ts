@@ -264,6 +264,7 @@ export function createAgentRuntime(dependencies: {
       id?: string,
       replyToMessageId?: string,
       presentation?: Presentation,
+      handoff?: boolean,
     ): Promise<ReplyDelivery> => {
       signal.throwIfAborted();
       const trimmed = text.trim();
@@ -274,7 +275,8 @@ export function createAgentRuntime(dependencies: {
         (trimmed === lastReply && (!visual || visual === lastPresentation))
       )
         return { delivered: false, presentation: outcome };
-      await context.reply(trimmed, id, replyToMessageId, presentation);
+      if (handoff) await context.reply(trimmed, id, replyToMessageId, presentation, true);
+      else await context.reply(trimmed, id, replyToMessageId, presentation);
       lastPresentation = visual;
       if (id) persistedStreams.add(id);
       lastReply = trimmed;
@@ -757,8 +759,9 @@ export function createAgentRuntime(dependencies: {
           id?: string,
           replyToMessageId?: string,
           presentation?: Presentation,
+          handoff?: boolean,
         ) => {
-          return reply(text, id, replyToMessageId, presentation);
+          return reply(text, id, replyToMessageId, presentation, handoff);
         },
         pause,
         confirm,
