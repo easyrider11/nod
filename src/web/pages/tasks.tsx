@@ -15,6 +15,7 @@ import {
   MessageSquare,
 } from '../components/icons';
 import type { Activity, Schedule, Task, TaskDetail } from '../../shared/contracts';
+import type { AccountPreferences } from '../../shared/account';
 import { taskHeadline, taskLabels } from '../../shared/task-status';
 import { InlineName } from '../components/inline-name';
 import { pageDataCache } from '../lib/page-data-cache';
@@ -408,6 +409,8 @@ export function Scheduled({
 }) {
   const schedules = usePageData<Schedule[]>('/api/schedules');
   const tasks = usePageData<Task[]>('/api/tasks');
+  const preferences = usePageData<AccountPreferences>('/api/preferences');
+  const activityRule = preferences.data?.notificationRule?.trim();
   const open = (tasks.data ?? []).filter((task) => !closed(task));
   const upcoming = (schedules.data ?? [])
     .filter((schedule) => schedule.enabled && schedule.nextRun)
@@ -431,6 +434,30 @@ export function Scheduled({
       )}
       {tasks.error && (
         <LoadError what="tasks" refreshing={tasks.refreshing} retry={tasks.refresh} />
+      )}
+      {preferences.error && (
+        <LoadError what="rules" refreshing={preferences.refreshing} retry={preferences.refresh} />
+      )}
+      {activityRule && (
+        <section className="saved-plan activity-rule" aria-labelledby="activity-rule-title">
+          <div className="saved-plan-title">
+            <h2 id="activity-rule-title">Activity rule</h2>
+          </div>
+          <p className="saved-plan-description">{activityRule}</p>
+          <div className="saved-plan-footer">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                onAsk(
+                  'Help me change my notification rule for new activity. Ask what I want to change.',
+                )
+              }
+            >
+              Change in Chat
+            </Button>
+          </div>
+        </section>
       )}
       {open.length > 0 && (
         <div className="saved-plan-list open-task-list">

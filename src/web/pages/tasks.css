@@ -49,6 +49,12 @@
 .open-task-list {
   margin-bottom: 24px;
 }
+.activity-rule {
+  margin-bottom: 24px;
+}
+.activity-rule .saved-plan-description {
+  margin: 0;
+}
 .schedule-runs {
   display: grid;
   gap: 12px;
