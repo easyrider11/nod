@@ -85,13 +85,11 @@ export function createMemoryRecall(options: {
     const recent = context.history
       .filter((message) => message.role === 'user' && !unsafe(message.text))
       .slice(-6)
-      .map((message) => ({
-        ...message,
-        text: selectionText(message.text, 1_200),
-        ...(message.audioCaption
-          ? { audioCaption: selectionText(message.audioCaption, 1_200) }
-          : {}),
-      }));
+      .map((message) => {
+        const bounded = { ...message, text: selectionText(message.text, 1_200) };
+        delete bounded.audioCaption;
+        return bounded;
+      });
     if (!notes.length && !recent.length && !context.relatedConversation?.length) return;
     const fallback = await options.memory.find({ query: context.prompt });
     const selectionDeadline = AbortSignal.timeout(1_000);
