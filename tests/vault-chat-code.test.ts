@@ -547,6 +547,8 @@ test(
             '2 hinges for 2041',
             'card ending 4242',
             'The year is 2026',
+            'What is code abc123def?',
+            'What is code abc123?',
           ];
           for (const text of unrelated) assert.equal((await send(text)).statusCode, 200, text);
           const wrappedCodes = ['my code is 1234', 'Code: 123', 'O código é 739', 'pin 8421'];

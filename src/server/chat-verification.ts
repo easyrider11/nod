@@ -42,7 +42,7 @@ function conflict(message: string) {
 
 function codeBearingPaymentReply(text: string) {
   return (
-    /(?<!\d)\d{3,4}(?!\d)/u.test(text) &&
+    /(?<![\p{L}\p{N}])\d{3,4}(?![\p{L}\p{N}])/u.test(text) &&
     /(?<![\p{L}\p{N}])(?:code|c[oó]digo|pin|otp|passcode|verification|cvv|cvc)(?![\p{L}\p{N}])/iu.test(
       text,
     )
