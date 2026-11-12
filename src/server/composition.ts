@@ -1633,6 +1633,8 @@ async function initializeApplication(
     pool,
     ownerId,
     analytics: captureAnalytics,
+    modelAvailable: () =>
+      adapters.models?.automaticRequestsAllowed() ?? Promise.resolve(adapters.model.configured),
     redact: createTextRedactor(secrets),
     sources: (client) => observations.sources(client),
     read: async (turn, input, signal) => {

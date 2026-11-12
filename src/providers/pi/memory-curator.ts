@@ -5,6 +5,7 @@ import {
   type Context,
 } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import { retryAssistantCall } from '@earendil-works/pi-ai/utils/retry';
 import { createPiModelRuntime } from './models.ts';
 import type { ModelAccess } from '../../ports/models.ts';
 import { lightestEffort } from '../../shared/models.ts';
@@ -86,9 +87,10 @@ export function createPiMemoryCurator(options: {
   async function load() {
     const access = await options.resolve?.();
     if (options.resolve && !access) throw new Error('The selected model is unavailable.');
+    await access?.prepareRequest?.(access.definition.choice.id, true);
     if (access)
       return {
-        ...(await createPiModelRuntime(access)),
+        ...(await createPiModelRuntime(access, { automatic: true })),
         effort: access.effort,
         subscription: access.method === 'subscription',
       };
@@ -115,6 +117,7 @@ export function createPiMemoryCurator(options: {
       model,
       effort: options.lightest ? lightestEffort(getSupportedThinkingLevels(model)) : undefined,
       subscription: false,
+      requestFacts: undefined,
     };
   }
   return {
@@ -131,7 +134,7 @@ export function createPiMemoryCurator(options: {
         loaded = undefined;
         throw error;
       });
-      const { runtime, model, effort, subscription } = await loaded;
+      const { runtime, model, effort, subscription, requestFacts } = await loaded;
       const sessionId = ['opencode', 'opencode-go'].includes(model.provider)
         ? crypto.randomUUID()
         : undefined;
@@ -194,21 +197,17 @@ export function createPiMemoryCurator(options: {
         if (!untraced.has(task) && options.traces?.active())
           options.traces.record(
             piModelTrace(
-              { model: target, context, message: reply, startedAt },
+              { model: target, context, message: reply, startedAt, request: requestFacts?.(reply) },
               { source: 'curator', task },
             ),
           );
         return reply;
       };
-      let reply = await complete();
-      for (
-        let attempt = 0;
-        attempt < (task === 'vision' || task === 'classify' ? 0 : 2) &&
-        reply.stopReason === 'error' &&
-        !signal?.aborted;
-        attempt++
-      )
-        reply = await complete();
+      const reply = await retryAssistantCall(
+        complete,
+        { enabled: task !== 'vision' && task !== 'classify', maxRetries: 2, baseDelayMs: 250 },
+        signal,
+      );
       if (
         reply.stopReason === 'error' ||
         reply.stopReason === 'aborted' ||
