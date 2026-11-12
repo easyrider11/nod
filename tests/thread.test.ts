@@ -2091,6 +2091,16 @@ test(
               ],
               anchor: 1,
             },
+            {
+              prompt: 'Review whether the synthetic invoice can be approved.',
+              prior: 'I will not approve the synthetic invoice.',
+              start: 'I will approve the synthetic invoice.',
+              expected: [
+                'I will not approve the synthetic invoice.',
+                'I will approve the synthetic invoice.',
+              ],
+              anchor: 1,
+            },
           ] as const;
           const started = new Map<string, Task>();
           inspectObserver = async (context) => {

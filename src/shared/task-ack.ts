@@ -117,6 +117,7 @@ export function resemblesTaskAcknowledgement(text: string, start: string, handof
     );
   return (
     !/[\p{N}€$£\n]|https?:\/\//iu.test(text) &&
+    polarity(text) === polarity(start) &&
     (status ? overlap(text, start, 0.45, 0.4, 3) : handoff && nearDuplicate(text, start))
   );
 }
