@@ -7,7 +7,7 @@ import type {
   VaultActivityReason,
 } from '../../shared/contracts';
 import { api, errorMessage } from '../lib/api';
-import { formatDayLabel, formatTime, useDateFormat } from '../lib/date-format';
+import { formatDayLabel, formatTime, useDateFormat, type DateFormat } from '../lib/date-format';
 import { originLabel } from '../lib/vault-name';
 import { Button, Notice } from './ui';
 import { becauseText } from '../lib/trust-because';
@@ -84,8 +84,17 @@ function pill(entry: VaultActivityEntry): [string, string] {
   return [reasons[entry.reason], ''];
 }
 
-export function VaultUse({ entry, open }: { entry: VaultActivityEntry; open?(): void }) {
-  const format = useDateFormat();
+export function VaultUse({
+  entry,
+  open,
+  format,
+}: {
+  entry: VaultActivityEntry;
+  open?(): void;
+  format?: DateFormat;
+}) {
+  const savedFormat = useDateFormat();
+  const displayFormat = format ?? savedFormat;
   const Icon = icons[entry.action];
   const [text, tone] = pill(entry);
   const content = (
@@ -95,7 +104,7 @@ export function VaultUse({ entry, open }: { entry: VaultActivityEntry; open?(): 
       </span>
       <span className="vault-use-text">
         <b>{title(entry)}</b>
-        <span>{[formatTime(entry.at, format), entry.task].filter(Boolean).join(' · ')}</span>
+        <span>{[formatTime(entry.at, displayFormat), entry.task].filter(Boolean).join(' · ')}</span>
         {entry.because && entry.because.kind !== 'approved' && (
           <Tooltip content={becauseText(entry.because)}>
             <small className="usage-because">{becauseText(entry.because)}</small>

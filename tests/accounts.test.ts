@@ -37,6 +37,23 @@ import {
   createRedactor,
   createTextRedactor,
 } from '../src/server/redaction.ts';
+import {
+  browserDateFormat,
+  dateFormatFrom,
+  dayKey,
+  formatTime,
+} from '../src/web/lib/date-format.ts';
+
+test('Usage activity follows the browser zone without changing the saved zone', () => {
+  const saved = dateFormatFrom({ locale: 'en-GB', hourCycle: 'h23', timeZone: 'Europe/London' });
+  const usage = browserDateFormat(saved, 'Europe/Madrid');
+  assert.equal(formatTime('2026-11-05T12:00:00Z', saved), '12:00');
+  assert.equal(formatTime('2026-11-05T12:00:00Z', usage), '13:00');
+  assert.equal(dayKey('2026-11-05T23:30:00Z', saved), '2026-11-05');
+  assert.equal(dayKey('2026-11-05T23:30:00Z', usage), '2026-11-06');
+  assert.equal(saved.timeZone, 'Europe/London');
+  assert.equal(browserDateFormat(saved, 'Invalid/Zone').timeZone, 'Europe/London');
+});
 
 test('decision selection uses the LLM only when no decision connection is available', async () => {
   let resolutions = 0;

@@ -30,6 +30,7 @@ import {
   formatDayLabel,
   formatNumber,
   formatTime,
+  useBrowserDateFormat,
   useDateFormat,
   type DateFormat,
 } from '../lib/date-format';
@@ -376,8 +377,15 @@ function billingSource(model: TrustModel) {
   return provider ? `${provider} API` : 'API usage';
 }
 
-function TrustRow({ entry, showCosts }: { entry: TrustEntry; showCosts: boolean }) {
-  const format = useDateFormat();
+function TrustRow({
+  entry,
+  showCosts,
+  format,
+}: {
+  entry: TrustEntry;
+  showCosts: boolean;
+  format: DateFormat;
+}) {
   const models = entry.models ?? [];
   const { icon: Icon, label } = sources[entry.source];
   const did = [...new Set(entry.actions.map((action) => action.label))].join(', ');
@@ -494,7 +502,7 @@ function Statement({
   showCosts: boolean;
   hidden: boolean;
 }) {
-  const format = useDateFormat();
+  const format = useBrowserDateFormat();
   const [trust, setTrust] = useState<Stream<TrustEntry>>(view);
   const [uses, setUses] = useState<Stream<VaultActivityEntry>>({
     entries: vault.entries,
@@ -591,9 +599,9 @@ function Statement({
             {items.map((row) => (
               <li key={row.key}>
                 {row.use ? (
-                  <VaultUse entry={row.use} open={opener(row.use)} />
+                  <VaultUse entry={row.use} open={opener(row.use)} format={format} />
                 ) : (
-                  <TrustRow entry={row.trust!} showCosts={showCosts} />
+                  <TrustRow entry={row.trust!} showCosts={showCosts} format={format} />
                 )}
               </li>
             ))}

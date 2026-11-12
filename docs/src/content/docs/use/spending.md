@@ -16,6 +16,8 @@ Open **Usage** in the sidebar (⌘5 in the Mac app, Ctrl+5 in the Windows or Lin
 - **The sentence at the top.** With an API model selected, this month's API spending and your monthly limit. Select the total to inspect spending or the limit to change it. With a ChatGPT plan selected, it says your usage comes from that plan.
 - **The list.** Model requests, connected app actions, sign-ins and card uses, grouped by day. Each line shows where it came from, such as **Schedule**, **Activity check** or **Task Nod started**, and what Nod did. A source check that found nothing to prepare says so, and a task's planned check reads **Checked on** with the task's name. Model requests show the models recorded for that run, including helpers and checks. Changing your selected model doesn't change these records. If an older request didn't record its model, the row says so. Under an action your words allowed, it shows those words, such as _You said "Send Lena the report"_.
 
+The on-screen list groups activity and shows times in your computer's current time zone. The time zone saved in **Settings → General** still controls schedules, quiet hours and the monthly spending period.
+
 With a ChatGPT plan selected, Usage hides cost amounts, forecasts and monthly limit controls, including amounts on older API requests. Those requests still identify their recorded models and API connection. With an API model selected, recorded API costs are visible again; plan usage stays labeled separately and its API-price estimate is never shown as a charge. A run that used both shows its recorded API cost and identifies the models that used the plan.
 
 Scroll down to load earlier activity automatically.
