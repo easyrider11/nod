@@ -33,6 +33,7 @@ import {
   systemPrompt,
 } from './prompt.ts';
 import { untrustedBlock } from '../shared/untrusted.ts';
+import { repeatsTaskStart } from '../shared/task-ack.ts';
 import { currentUserTime, localResultTimes } from './time-context.ts';
 import { connectedTools, mcpNamespaces, nodTools } from './tools.ts';
 import type { ReplyDelivery, Turn } from './turn.ts';
@@ -233,6 +234,7 @@ export function createAgentRuntime(dependencies: {
     let reported = false;
     let finalDelivered = false;
     let requestRevision = 0;
+    let taskStart: { revision: number; message: string; previousReply: string } | undefined;
     const activeToolCalls = new Set<Promise<unknown>>();
     const observe = (event: RuntimeObservation) => {
       if (signal.aborted && !(event.type === 'tool_end' && event.status === 'cancelled')) return;
@@ -306,7 +308,8 @@ export function createAgentRuntime(dependencies: {
 
     const flushText = () => {
       if (bufferedText && !stopped && speaks) {
-        if (speakNext || replyOwed) context.delta(bufferedText, (streamId ??= randomUUID()));
+        if ((speakNext || replyOwed) && (taskStart?.revision !== requestRevision || replyOwed))
+          context.delta(bufferedText, (streamId ??= randomUUID()));
         streamedText += bufferedText;
       }
       bufferedText = '';
@@ -476,6 +479,12 @@ export function createAgentRuntime(dependencies: {
             (name === 'task' && (params as { action?: unknown } | null)?.action === 'start')
           )
             reported = true;
+          if (name === 'task' && (params as { action?: unknown } | null)?.action === 'start')
+            taskStart = {
+              revision,
+              message: String((params as { message?: unknown }).message ?? ''),
+              previousReply: lastReply,
+            };
           if (!stopped) await context.emit('tool_complete', label, event());
           result = isToolResult(output) ? output : textResult(output);
           if (
@@ -1078,7 +1087,15 @@ export function createAgentRuntime(dependencies: {
             pendingReplies = pendingReplies.then(() =>
               context.emit('final', '', { execution }).catch(() => {}),
             );
-            queueStreamReply(event.text, streamId ?? randomUUID());
+            if (
+              taskStart?.revision === requestRevision &&
+              !replyOwed &&
+              [taskStart.message, taskStart.previousReply].some((message) =>
+                repeatsTaskStart(event.text, message),
+              )
+            )
+              streamSubmitted = true;
+            else queueStreamReply(event.text, streamId ?? randomUUID());
           }
         },
       });

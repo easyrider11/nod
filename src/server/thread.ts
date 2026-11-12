@@ -182,7 +182,12 @@ export interface ThreadDependencies {
     exclude: string | null,
   ) => Promise<NonNullable<RuntimeContext['relatedConversation']>>;
   learnedSkills?: () => Promise<RuntimeContext['learnedSkills']>;
-  task?: (turn: TurnRef, input: unknown, sourceMessageId: string | null) => Promise<unknown>;
+  task?: (
+    turn: TurnRef,
+    input: unknown,
+    sourceMessageId: string | null,
+    priorMessageId?: string,
+  ) => Promise<unknown>;
   taskContext?: (turn: TurnRef) => Promise<RuntimeContext['taskContext']>;
   settleTask?: (turn: TurnRef, result: string) => Promise<void>;
   taskLedger?: (threadId: string) => Promise<NonNullable<RuntimeContext['tasks']>>;
@@ -1679,6 +1684,8 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
   const replies: Array<{ id: string; text: string; source: string }> = [];
   let explicitAudio = false;
   const published = new Map<string, Artifact>();
+  let sourceMessageId: string | null = null;
+  let lastPlainReply: { id: string; sourceMessageId: string | null } | undefined;
   const post = async (
     text: string,
     attachments: Artifact[] = [],
@@ -1687,6 +1694,8 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
     presentation?: Presentation,
   ) => {
     const source = text;
+    const postedFor = sourceMessageId;
+    const plain = !attachments.length && !presentation && !replyFileReferences(source).length;
     const created = new Map<string, Artifact>();
     const cleanup: Array<() => Promise<void>> = [];
     let rolledBack = false;
@@ -1736,6 +1745,7 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
       });
       const spoken = presentation && !text.trim() ? presentationText(presentation) : text;
       if (spoken.trim()) replies.push({ id, text: spoken, source });
+      lastPlainReply = plain && spoken.trim() ? { id, sourceMessageId: postedFor } : undefined;
     } catch (error) {
       if (rolledBack) await Promise.allSettled(cleanup.map((remove) => remove()));
       throw error;
@@ -1801,7 +1811,7 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
     await ensureCurrent();
     const loaded = await loadTurnContext(turn, dependencies);
     const proactivity = await dependencies.proactivity?.(ref, signal);
-    let sourceMessageId = loaded.sourceMessageId;
+    sourceMessageId = loaded.sourceMessageId;
     let voice = loaded.voice;
     let ownerMessage = turn.source === 'user';
     const stagedFiles = new Map<string, string>();
@@ -2055,7 +2065,20 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
       manage: fenced((action, args, admit) =>
         dependencies.manage(ref, action, args, { sourceMessageId, admit }),
       ),
-      task: dependencies.task && fenced((input) => dependencies.task!(ref, input, sourceMessageId)),
+      task:
+        dependencies.task &&
+        fenced((input) =>
+          dependencies.task!(
+            ref,
+            input,
+            sourceMessageId,
+            (input as { action?: unknown })?.action === 'start' &&
+              sourceMessageId &&
+              lastPlainReply?.sourceMessageId === sourceMessageId
+              ? lastPlainReply.id
+              : undefined,
+          ),
+        ),
       takeMessages:
         turn.background && !taskContext
           ? undefined

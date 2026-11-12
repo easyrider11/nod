@@ -1153,7 +1153,7 @@ export function nodTools(turn: Turn, skills?: SkillLibrary): NodTool[] {
         ? {
             ...(result as object),
             message:
-              'The task now does this work in its own session and reports its result. Do not do any of it here; end the turn unless another request still needs an answer.',
+              'The task has started and its start message is already visible. Do not add another acknowledgement or recap. The task now does this work in its own session and reports its result. End the turn unless another request still needs an answer.',
           }
         : result;
     }),
