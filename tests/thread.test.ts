@@ -2052,6 +2052,17 @@ test(
               anchor: 0,
             },
             {
+              prompt: 'Prepare synthetic email reply drafts and wait for approval.',
+              prior:
+                "On it. I'll draft email replies. No email replies will be sent without your approval.",
+              start:
+                "I've started drafting email replies. No email replies will be sent without your approval.",
+              expected: [
+                "On it. I'll draft email replies. No email replies will be sent without your approval.",
+              ],
+              anchor: 0,
+            },
+            {
               prompt: 'Revisa el buzón sintético y prepara borradores.',
               prior:
                 'Ya estoy revisando tu buzón y preparando borradores de respuesta. No enviaré nada sin tu aprobación.',

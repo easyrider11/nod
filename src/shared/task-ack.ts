@@ -112,16 +112,22 @@ function polarity(text: string) {
 
 function conflictingPolarity(text: string, start: string) {
   const clauses = (value: string) => value.split(/[.!?\n]+/u).filter((clause) => clause.trim());
-  return clauses(text).some((answer) =>
-    clauses(start).some((acknowledgement) => {
-      if (polarity(answer) === polarity(acknowledgement)) return false;
-      const first = words(answer);
-      const second = words(acknowledgement);
-      const shorter = Math.min(first.size, second.size);
-      const shared = [...first].filter((word) => second.has(word)).length;
-      return (shared >= 2 && shared / shorter >= 0.5) || (shared === 1 && shorter === 1);
-    }),
-  );
+  const candidates = clauses(start).map((clause) => ({ clause, terms: words(clause) }));
+  return clauses(text).some((answer) => {
+    const terms = words(answer);
+    let best: { clause: string; score: number } | undefined;
+    for (const candidate of candidates) {
+      const shared = [...terms].filter((word) => candidate.terms.has(word)).length;
+      const score = shared / Math.max(terms.size, candidate.terms.size);
+      if (
+        (shared >= 2 || (shared === 1 && terms.size === 1 && candidate.terms.size === 1)) &&
+        score >= 0.5 &&
+        (!best || score > best.score)
+      )
+        best = { clause: candidate.clause, score };
+    }
+    return best ? polarity(answer) !== polarity(best.clause) : false;
+  });
 }
 
 export function resemblesTaskAcknowledgement(text: string, start: string, handoff = false) {
