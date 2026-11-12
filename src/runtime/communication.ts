@@ -36,3 +36,14 @@ export function vaultInvitation(
   if (!text || !label) throw new Error('Describe the secure step and its button.');
   return `${text} [${label}](${url})`;
 }
+
+export function paymentInvitation(url: string | undefined, message: string, action: string) {
+  if (
+    !url ||
+    !/^\/payments\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(url)
+  )
+    throw new Error('The payment link is unavailable.');
+  const text = message.trim();
+  if (!text) throw new Error('Describe the payment step.');
+  return `${text}\n\n${actionLink(url, action)}`;
+}

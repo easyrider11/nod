@@ -27,7 +27,7 @@ import {
 import { fileBytes } from '../shared/files.ts';
 import { basename } from 'node:path';
 import { isMessageReaction } from '../shared/emoji.ts';
-import { actionLink, vaultInvitation } from './communication.ts';
+import { actionLink, paymentInvitation, vaultInvitation } from './communication.ts';
 import { untrustedBlock } from '../shared/untrusted.ts';
 import { withoutSchemaPatterns } from '../shared/json-schema.ts';
 import type { Turn } from './turn.ts';
@@ -1050,7 +1050,9 @@ export function nodTools(turn: Turn, skills?: SkillLibrary): NodTool[] {
       const result = await context.requestPayment(p);
       await pause(
         'credentials',
-        result.url ? actionLink(result.url, result.question) : result.question,
+        result.url
+          ? paymentInvitation(result.url, result.question, result.action)
+          : result.question,
       );
       return 'Waiting for private payment approval.';
     }),

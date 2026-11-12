@@ -31,6 +31,26 @@ import { serverNetwork } from '../src/server/network.ts';
 import { approvalContent, approvalTitle } from '../src/server/action-presentation.ts';
 import { createCommunication } from '../src/server/communication.ts';
 
+test('payment presentation repairs a missing action and keeps it separate from the message', async () => {
+  let drafts = 0;
+  const communication = createCommunication({
+    pool: {} as pg.Pool,
+    ownerId: 'synthetic-owner',
+    review: async (_instructions, input) => {
+      assert.equal((input as { purpose: string }).purpose, 'payment');
+      drafts++;
+      return drafts === 1
+        ? { text: 'Synthetic payment details.' }
+        : { text: 'Synthetic payment details.', action: 'Approve payment' };
+    },
+  });
+  assert.deepEqual(await communication.presentPayment(null, { kind: 'payment' }), {
+    question: 'Synthetic payment details.',
+    action: 'Approve payment',
+  });
+  assert.equal(drafts, 2);
+});
+
 test('confirmation repair keeps action facts fixed and requires a new independent check', async () => {
   const data = {
     kind: 'confirmation',

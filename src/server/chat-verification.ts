@@ -258,7 +258,7 @@ export async function createChatVerification(
                  'u',
                  `newer.created_at>u.created_at AND (NOT $7::boolean OR newer.created_at<now()-interval '10 minutes')`,
                )})
-               AND ((r.kind='payment' AND ($4::boolean OR ($5::boolean AND u.channel=$2))) OR (r.kind='otp' AND $5::boolean)) LIMIT 1`,
+               AND ((r.kind='payment' AND ($4::boolean OR ($8::boolean AND u.channel=$2))) OR (r.kind='otp' AND $5::boolean)) LIMIT 1`,
             [
               options.ownerId,
               channel,
@@ -267,6 +267,7 @@ export async function createChatVerification(
               reply.kind !== 'ordinary',
               turnId ?? null,
               reply.kind === 'code' || reply.kind === 'wrapped' || Boolean(codes.payment),
+              reply.kind === 'code',
             ],
           )
         ).rows[0];
@@ -288,6 +289,11 @@ export async function createChatVerification(
         );
       const request = requests.rows[0]!;
       const code = codes[request.kind];
+      if (!code && request.kind === 'payment' && !requestId && reply.kind !== 'code') {
+        await input.persistOrdinary?.(client);
+        await client.query('COMMIT');
+        return;
+      }
       if (!code && request.kind === 'otp' && reply.kind === 'ordinary') {
         await input.persistOrdinary?.(client);
         await client.query('COMMIT');
