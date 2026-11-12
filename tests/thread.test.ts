@@ -822,6 +822,14 @@ test(
           assert.equal(text.length, 100_000);
           assert.ok(displayText.length > 700_000);
           assert.ok(Buffer.byteLength(message) > 1024 * 1024);
+          const overText = await isolated.inject({
+            method: 'POST',
+            url: '/api/messages',
+            headers: { ...headers, 'content-type': 'application/json' },
+            payload: JSON.stringify({ text: 'x'.repeat(100_001) }),
+          });
+          assert.equal(overText.statusCode, 400);
+          assert.equal(overText.json().code, 'message_too_long');
           assert.equal(
             (
               await isolated.inject({
