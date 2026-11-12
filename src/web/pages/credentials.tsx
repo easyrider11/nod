@@ -398,7 +398,9 @@ function CredentialForm({ id, embedded, onClose, onRequestChange }: PrivateFormP
       '/retry',
       {},
       () => setRetried(true),
-      'Nod could not check this sign-in step. Return to chat to check the page.',
+      uncertain
+        ? 'Nod could not check this sign-in step. Return to chat and ask Nod to inspect the page.'
+        : 'A new sign-in step could not be requested. Return to chat to check this task.',
     );
   }
   function submitted(result: { ok: boolean; retryUrl?: string; error?: string }) {
@@ -538,7 +540,7 @@ function CredentialForm({ id, embedded, onClose, onRequestChange }: PrivateFormP
             <LockKeyhole size={32} />
             <h1>
               {retried
-                ? 'Nod is checking the sign-in.'
+                ? 'Nod is continuing the sign-in.'
                 : uncertain
                   ? 'The result is unknown.'
                   : 'This link has expired.'}

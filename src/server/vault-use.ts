@@ -1,6 +1,6 @@
 import { transaction as inTransaction } from './transaction.ts';
 import { randomUUID } from 'node:crypto';
-import type { Pool, PoolClient } from 'pg';
+import { DatabaseError, type Pool, type PoolClient } from 'pg';
 import { logFailure } from './failure-log.ts';
 import type { AnalyticsEvent, CaptureAnalytics } from './analytics.ts';
 import { BrowserActionError } from '../ports/computer.ts';
@@ -35,6 +35,21 @@ export class VaultUseError extends Error {
   ) {
     super(message);
   }
+}
+
+function failureCause(error: unknown) {
+  if (error instanceof BrowserActionError) return 'browser';
+  if (error instanceof DatabaseError) return 'database';
+  if (!(error instanceof Error)) return 'unknown';
+  try {
+    if (
+      ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE'].includes(
+        (error as Error & { code?: string }).code ?? '',
+      )
+    )
+      return 'transport';
+  } catch {}
+  return 'operation';
 }
 
 export async function createVaultUses(pool: Pool, ownerId: string, analytics?: CaptureAnalytics) {
@@ -85,6 +100,7 @@ export async function createVaultUses(pool: Pool, ownerId: string, analytics?: C
         kind: ['identifier', 'password', 'otp', 'method', 'card', 'payment'].includes(use.kind)
           ? use.kind
           : 'other',
+        cause: failureCause(error),
         ...(error instanceof BrowserActionError && browserErrorMessage(error.code)
           ? { browserCode: error.code }
           : {}),

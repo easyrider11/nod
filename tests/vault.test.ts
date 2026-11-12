@@ -13,7 +13,7 @@ import { PrivateEntryWorkspace, usePrivateEntry } from '../src/web/components/pr
 import { pageDataCache } from '../src/web/lib/page-data-cache.ts';
 import { Composio } from '@composio/core';
 import Fastify, { type FastifyInstance } from 'fastify';
-import pg from 'pg';
+import pg, { DatabaseError } from 'pg';
 import { BrowserActionError, type CredentialKind } from '../src/ports/computer.ts';
 import type { IntegrationProvider, VerificationEmail } from '../src/ports/integrations.ts';
 import { readVerificationEmails } from '../src/providers/composio/verification-email.ts';
@@ -325,7 +325,7 @@ test(
                       const result = await client.query(...args);
                       if (args[0] === 'COMMIT' && loseCommit) {
                         loseCommit = false;
-                        throw new Error('Synthetic lost commit acknowledgement');
+                        throw new DatabaseError('fixture-private-value', 0, 'error');
                       }
                       return result;
                     };
@@ -472,6 +472,17 @@ test(
         (error: unknown) => error instanceof VaultUseError && error.statusCode === 409,
       );
       assert.equal(websiteSubmissions, 1);
+      const disconnected = { ...use, id: randomUUID() };
+      await withFailureLog(record, async () => {
+        await assert.rejects(
+          uses.run(disconnected, {
+            perform: async () => {
+              throw Object.assign(new Error('fixture-private-value'), { code: 'ECONNRESET' });
+            },
+          }),
+          uncertain,
+        );
+      });
       const unfinished = { ...use, id: randomUUID() };
       await withFailureLog(record, async () => {
         await assert.rejects(
@@ -516,10 +527,16 @@ test(
           .filter((failure) => failure.event === 'vault_private_operation_interrupted')
           .map((failure) => failure.context),
         [
-          { stage: 'claim', kind: 'password' },
-          { stage: 'entry', kind: 'password', browserCode: 'browser_card_changed' },
-          { stage: 'completion', kind: 'password' },
-          { stage: 'entry', kind: 'other' },
+          { stage: 'claim', kind: 'password', cause: 'database' },
+          {
+            stage: 'entry',
+            kind: 'password',
+            cause: 'browser',
+            browserCode: 'browser_card_changed',
+          },
+          { stage: 'entry', kind: 'password', cause: 'transport' },
+          { stage: 'completion', kind: 'password', cause: 'operation' },
+          { stage: 'entry', kind: 'other', cause: 'browser' },
         ],
       );
       assert.equal(
