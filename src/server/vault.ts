@@ -1364,7 +1364,7 @@ export async function createVault(pool: Pool, options: VaultOptions) {
          ON u.id=r.turn_id AND u.owner_id=r.owner_id AND u.thread_id=r.thread_id
        LEFT JOIN vault_uses v ON v.id=r.id AND v.owner_id=r.owner_id AND r.status='consumed'
        WHERE r.owner_id=$1 AND r.thread_id=$2 AND u.session_id=$3 AND r.turn_id=ANY($4::uuid[])
-       ORDER BY r.created_at DESC,r.id DESC LIMIT 30`,
+       ORDER BY r.created_at DESC,r.id DESC`,
       [owner, threadId, sessionId, turnIds],
     );
     return rows.map((row) => ({

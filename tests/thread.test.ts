@@ -9400,9 +9400,43 @@ test(
               ],
             );
             const instruction = firstInstruction(ran(next.turnId)!, true, new Set());
-            assert.match(instruction, /credentialRequests/);
-            assert.match(instruction, /lab897-main\.test/);
-            assert.match(instruction, /expired/);
+            const requestData = JSON.parse(
+              instruction.split('Request data (JSON):\n')[1]!.split('\n\n')[0]!,
+            ) as { credentialRequests: string };
+            assert.match(requestData.credentialRequests, /lab897-main\.test/);
+            assert.match(requestData.credentialRequests, /"status":"expired"/);
+
+            const batchId = randomUUID();
+            const added = await db.pool.query<{ id: string }>(
+              `INSERT INTO credential_requests (
+                 id,token_hash,owner_id,thread_id,turn_id,root_turn_id,origin,label,kind,
+                 status,selectors,inspection,browser_id,flow_id,flow_expires_at,created_at
+               ) SELECT md5($2||':'||series.n::text),md5($2||':token:'||series.n::text),
+                 r.owner_id,r.thread_id,r.turn_id,r.root_turn_id,
+                 'https://lab897-extra-'||series.n::text||'.test','Synthetic previous sign-in',r.kind,
+                 'superseded',r.selectors,r.inspection,r.browser_id,r.flow_id,r.flow_expires_at,
+                 r.created_at+series.n*interval '1 second'
+               FROM credential_requests r CROSS JOIN generate_series(1,30) AS series(n)
+               WHERE r.turn_id=$1 RETURNING id`,
+              [signIn.turnId, batchId],
+            );
+            try {
+              const sessionId = (
+                await db.pool.query<{ session_id: string }>(
+                  'SELECT session_id FROM turns WHERE id=$1',
+                  [signIn.turnId],
+                )
+              ).rows[0]!.session_id;
+              const statuses = await vault.requestStatuses(signIn.threadId, sessionId, [
+                signIn.turnId,
+              ]);
+              assert.equal(statuses.length, 31);
+              assert.equal(statuses.find((item) => item.origin === mainOrigin)?.status, 'expired');
+            } finally {
+              await db.pool.query('DELETE FROM credential_requests WHERE id=ANY($1::text[])', [
+                added.rows.map((row) => row.id),
+              ]);
+            }
           } finally {
             inspectObserver = originalObserver;
           }
