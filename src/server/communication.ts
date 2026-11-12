@@ -161,6 +161,7 @@ export function createCommunication(options: {
       delete details[key];
     }
     delete details.verifiedBinding;
+    delete details.reason;
     const source = {
       action: proposal.action,
       args,
@@ -186,7 +187,7 @@ export function createCommunication(options: {
       'Do you approve this exact action?',
     ]
       .join('\n\n')
-      .replace(/\p{Cf}/gu, (character) =>
+      .replace(/(?![\u200c\u200d])\p{Cf}/gu, (character) =>
         Array.from(
           { length: character.length },
           (_, index) => `\\u${character.charCodeAt(index).toString(16).padStart(4, '0')}`,

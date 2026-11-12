@@ -81,11 +81,19 @@ export function gmailMessageTarget(result: unknown, expectedId: string) {
     headers
       .map(object)
       .find((item) => typeof item?.name === 'string' && item.name.toLowerCase() === name)?.value;
-  const field = (...values: unknown[]) =>
-    values.find((value) => typeof value === 'string' && value.trim()) as string | undefined;
-  const subject = field(message.subject, header('subject'))?.trim().slice(0, 300);
-  const from = field(message.from, message.sender, header('from'))?.trim().slice(0, 320);
-  const to = field(message.to, message.recipient, header('to'))?.trim().slice(0, 320);
+  const field = (limit: number, ...values: unknown[]) => {
+    const text = (
+      values.find((value) => typeof value === 'string' && value.trim()) as string | undefined
+    )?.trim();
+    if (!text) return;
+    const marker = ' [truncated]';
+    if (text.length <= limit) return text;
+    const prefix = text.slice(0, limit - marker.length).replace(/[\uD800-\uDBFF]$/, '');
+    return `${prefix}${marker}`;
+  };
+  const subject = field(300, message.subject, header('subject'));
+  const from = field(320, message.from, message.sender, header('from'));
+  const to = field(320, message.to, message.recipient, header('to'));
   if (!subject && !from && !to) return;
   return {
     messageId: expectedId,

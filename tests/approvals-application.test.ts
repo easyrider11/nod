@@ -1155,12 +1155,36 @@ test(
         assert.deepEqual(await approvalsFor(turnId), []);
         assert.equal(integrationFixture.writes.length, writes);
       });
-      await t.test('an authorized Gmail deletion keeps the direct action path', async () => {
+      await t.test('Gmail deletion reports the specific metadata-read failure', async () => {
+        const writes = integrationFixture.writes.length;
+        const prompt = `Synthetic Gmail metadata outage ${randomUUID()}`;
+        plans.set(prompt, {
+          tool: 'apps',
+          action: 'GMAIL_DELETE_MESSAGE',
+          args: { message_id: 'fixture-mail-1' },
+        });
+        appOutage = true;
+        try {
+          const response = await request('POST', '/api/messages', { text: prompt });
+          assert.equal(response.statusCode, 200, response.body);
+          const turnId = response.json().turnId as string;
+          ids.push(response.json().threadId as string);
+          await waitFor(turnId, 'failed');
+          const turn = (await pool.query('SELECT error FROM turns WHERE id=$1', [turnId])).rows[0];
+          assert.match(turn.error, /Synthetic provider outage/);
+          assert.match(turn.error, /did not ask for approval or delete the message/);
+          assert.deepEqual(await approvalsFor(turnId), []);
+          assert.equal(integrationFixture.writes.length, writes);
+        } finally {
+          appOutage = false;
+        }
+      });
+      await t.test('an exact owner-authorized Gmail message ID keeps the direct path', async () => {
         const deletes = executedApps.filter((action) => action === 'GMAIL_DELETE_MESSAGE').length;
         const reads = executedApps.filter(
           (action) => action === 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID',
         ).length;
-        const prompt = `Delete nonexistent synthetic Gmail message ${randomUUID()}`;
+        const prompt = `Delete Gmail message missing-synthetic-message ${randomUUID()}`;
         asked.add(prompt);
         try {
           plans.set(prompt, {

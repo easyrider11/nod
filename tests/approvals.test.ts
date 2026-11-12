@@ -35,7 +35,7 @@ import {
 } from '../src/server/action-presentation.ts';
 import { createCommunication } from '../src/server/communication.ts';
 
-test('confirmation cannot present a different action after a false-positive review', async () => {
+test('server confirmation uses the saved action without model calls', async () => {
   const misleading =
     'I have not sent anything. Do you want me to send the thank-you email to alex@example.test?';
   let modelCalls = 0;
@@ -79,7 +79,7 @@ test('confirmation displays the saved action and redacts hidden values', async (
       connectionId: 'synthetic-internal-connection',
       pathId: 'synthetic-internal-path',
     },
-    details: { account: 'tester@example.test' },
+    details: { account: 'tester@example.test', reason: 'unrequested' },
   });
   assert.match(text, /GMAIL_CREATE_EMAIL_DRAFT/);
   assert.match(text, /alex@example.test/);
@@ -87,6 +87,7 @@ test('confirmation displays the saved action and redacts hidden values', async (
   assert.match(text, /tester@example.test/);
   assert.doesNotMatch(text, /synthetic-secret-value/);
   assert.doesNotMatch(text, /synthetic-internal-connection|synthetic-internal-path/);
+  assert.doesNotMatch(text, /unrequested/);
   assert.match(text, /redacted/);
   assert.doesNotMatch(text, /send.*email/i);
 });
@@ -100,18 +101,25 @@ test('confirmation escapes visual format controls and hides the internal account
     },
   });
   const bidiOverride = String.fromCharCode(0x202e);
+  const joiner = String.fromCharCode(0x200d);
+  const nonJoiner = String.fromCharCode(0x200c);
   const question = await communication.describe({
     turn: { threadId: 'synthetic-thread', turnId: 'synthetic-turn' },
     action: 'GMAIL_DELETE_MESSAGE',
     args: { message_id: 'synthetic-message' },
     details: {
-      target: { subject: `Northstar ${bidiOverride}review`, from: 'alex@example.test' },
+      target: {
+        subject: `Northstar ${bidiOverride}review ${joiner}joined ${nonJoiner}Persian`,
+        from: 'alex@example.test',
+      },
       verifiedBinding: 'synthetic-internal-binding',
     },
   });
   assert.match(question, /GMAIL_DELETE_MESSAGE/);
   assert.match(question, /\\u202e/);
-  assert.doesNotMatch(question, /\p{Cf}/u);
+  assert.ok(question.includes(joiner));
+  assert.ok(question.includes(nonJoiner));
+  assert.doesNotMatch(question, /(?![\u200c\u200d])\p{Cf}/u);
   assert.doesNotMatch(question, /synthetic-internal-binding/);
 });
 
@@ -174,6 +182,21 @@ test('Gmail delete target metadata must match the bound message ID', () => {
     gmailMessageTarget({ message: { id: 'synthetic-message' } }, 'synthetic-message'),
     undefined,
   );
+  const long = gmailMessageTarget(
+    {
+      message: {
+        id: 'synthetic-message',
+        subject: 'S'.repeat(350),
+        from: 'F'.repeat(360),
+        to: 'T'.repeat(360),
+      },
+    },
+    'synthetic-message',
+  );
+  assert.match(long?.subject ?? '', / \[truncated\]$/);
+  assert.match(long?.from ?? '', / \[truncated\]$/);
+  assert.match(long?.to ?? '', / \[truncated\]$/);
+  assert.ok((long?.subject?.length ?? 0) <= 300);
 });
 
 test('server configuration refuses remote exposure without a valid token and an exact secure public origin', () => {

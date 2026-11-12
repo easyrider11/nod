@@ -781,6 +781,18 @@ async function initializeApplication(
   }
   await sweepArtifacts();
   const secrets = environmentSecrets(process.env);
+  const redactIntegrationFailure = createErrorRedactor(secrets);
+  const safeIntegrationFailure = (error: unknown) => {
+    const status =
+      (error as { statusCode?: unknown; status?: unknown } | null)?.statusCode ??
+      (error as { status?: unknown } | null)?.status;
+    const code =
+      typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599
+        ? `HTTP ${status}: `
+        : '';
+    const message = error instanceof Error ? error.message : String(error);
+    return `${code}${publicText(redactIntegrationFailure(message)).slice(0, 600)}`;
+  };
   adapters.models?.onSecrets((values) => {
     for (const value of values) if (!secrets.includes(value)) secrets.push(value);
   });
@@ -1317,10 +1329,10 @@ async function initializeApplication(
                       if (action === 'GMAIL_DELETE_MESSAGE') {
                         const currentBinding = await integrations
                           .binding(String(args.connectionId ?? ''))
-                          .catch(() => {
+                          .catch((error: unknown) => {
                             throw Object.assign(
                               new Error(
-                                'Nod could not check the selected Gmail account for deletion.',
+                                `Nod could not check the selected Gmail account for deletion: ${safeIntegrationFailure(error)}`,
                               ),
                               { notRun: true },
                             );
@@ -2236,10 +2248,10 @@ async function initializeApplication(
               options.signal,
               deleteBinding,
             );
-          } catch {
+          } catch (error) {
             options.signal?.throwIfAborted();
             throw new Error(
-              'Nod cannot verify which Gmail message this would delete, so it did not ask for approval or delete it.',
+              `The Gmail metadata read failed: ${safeIntegrationFailure(error)} Nod did not ask for approval or delete the message.`,
             );
           }
           await ledger.action(turn.turnId, 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID', readVerdict.basis);
