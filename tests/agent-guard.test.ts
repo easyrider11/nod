@@ -2877,6 +2877,48 @@ test(
   },
 );
 
+test('memory planning bounds pasted requests and recent owner messages', async () => {
+  const longText = (start: string, middle: string, end: string) =>
+    `${start}${'a'.repeat(16_000)}${middle}${'b'.repeat(16_000)}${end}`;
+  const request = longText('Current question: ', 'MIDDLE_CURRENT', ' Current closing question.');
+  const previous = longText('Earlier request: ', 'MIDDLE_PREVIOUS', ' Earlier closing request.');
+  const inputs: object[] = [];
+  const recall = createMemoryRecall({
+    pool: { query: async () => ({ rows: [] }) } as unknown as Pool,
+    ownerId: 'synthetic-owner',
+    memory: {
+      view: async () => ({ notes: [] }),
+      find: async () => [],
+    } as never,
+    curator: {
+      id: 'fixture',
+      configured: true,
+      async curate({ input }) {
+        inputs.push(input);
+        return { mode: 'none', paths: [], queries: [] };
+      },
+    },
+  });
+  await recall.prepare({
+    prompt: request,
+    history: [
+      { role: 'user', text: previous },
+      { role: 'user', text: previous.replace('PREVIOUS', 'ANOTHER') },
+    ],
+    signal: new AbortController().signal,
+  } as Parameters<typeof recall.prepare>[0]);
+  assert.equal(inputs.length, 1);
+  const input = inputs[0] as { request: string; recent: Array<{ text: string }> };
+  assert.ok(input.request.length <= 4_000);
+  assert.equal(input.recent.length, 2);
+  assert.ok(input.recent.every(({ text }) => text.length <= 1_200));
+  assert.ok(input.request.startsWith('Current question: '));
+  assert.ok(input.request.endsWith(' Current closing question.'));
+  assert.ok(input.recent[0].text.startsWith('Earlier request: '));
+  assert.ok(input.recent[0].text.endsWith(' Earlier closing request.'));
+  assert.ok(!JSON.stringify(input).includes('MIDDLE_'));
+});
+
 test('memory selection spend reaches the session check-in before the agent opens', async () => {
   let opened = false;
   await assert.rejects(
