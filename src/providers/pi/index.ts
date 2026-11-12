@@ -237,7 +237,12 @@ function stableRequestCache(
                 block.text.startsWith(longest),
             ),
         );
-        if (stableAt >= 0 && ownerAt > stableAt) {
+        if (
+          stableAt >= 0 &&
+          ownerAt === stableAt + 1 &&
+          ordered[stableAt]?.role === 'user' &&
+          ordered[ownerAt]?.role === 'user'
+        ) {
           const [owner] = ordered.splice(ownerAt, 1);
           ordered.splice(stableAt, 0, owner!);
         }
