@@ -120,7 +120,7 @@ Wait for a controlled frame to finish loading before checking an old control bin
 
 ## Manual acceptance harness
 
-[`scripts/e2e-nod.ts`](https://github.com/n8n-io/nod/blob/main/scripts/e2e-nod.ts) runs manual scenarios with a configured model key, disposable local database schema, and isolated browser and workspace containers. The harness supplies memory and classification curators. Its onboarding and trust reviews use the selected model at its lightest effort, as production does. You can check typed approval, decline, and expiry through the configured application path. Automated tests use synthetic curators and actions. They never call a live model or connected account.
+[`scripts/e2e-nod.ts`](https://github.com/n8n-io/nod/blob/main/scripts/e2e-nod.ts) runs manual scenarios with a configured model key, disposable local database schema, and isolated browser and workspace containers. The harness supplies memory and classification curators. Its onboarding and trust reviews use the selected model at its lightest effort, as production does. This is the first advertised `off`, `minimal`, `low`, or `medium` level, or the model's first advertised level if none of those is supported. You can check typed approval, decline, and expiry through the configured application path. Automated tests use synthetic curators and actions. They never call a live model or connected account.
 
 ## Mac guest protection
 
