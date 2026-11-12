@@ -1771,6 +1771,7 @@ async function initializeApplication(
           context.turnId,
           () => runtime.runTurn(context).finally(() => proactivity.release(context.turnId)),
           Boolean(context.spendingLimitReached),
+          !context.currentMessageId,
         ),
       spendingLimit: ledger.reachedLimit,
       checkIn: ledger.checkIn,

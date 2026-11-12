@@ -21,7 +21,12 @@ export async function modelServiceError(
   let serviceReason: string | undefined;
   const reader = response.body?.getReader();
   try {
-    if (reader && response.headers.get('content-type')?.includes('application/json')) {
+    if (
+      reader &&
+      /\/(?:json|[\w.-]+\+json)$/i.test(
+        response.headers.get('content-type')?.split(';', 1)[0].trim() ?? '',
+      )
+    ) {
       const chunks: Uint8Array[] = [];
       let size = 0;
       while (true) {

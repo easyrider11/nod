@@ -84,13 +84,17 @@ export function createPiMemoryCurator(options: {
   traces?: ModelTraces;
 }): MemoryCurator {
   let loaded: ReturnType<typeof load> | undefined;
-  async function load() {
+  async function load(automatic: boolean) {
     const access = await options.resolve?.();
     if (options.resolve && !access) throw new Error('The selected model is unavailable.');
-    await access?.prepareRequest?.(access.definition.choice.id, true);
+    if (access)
+      await access.prepareRequest?.(
+        access.textModel?.definition.choice.id ?? access.definition.choice.id,
+        automatic,
+      );
     if (access)
       return {
-        ...(await createPiModelRuntime(access, { automatic: true })),
+        ...(await createPiModelRuntime(access, { automatic })),
         effort: access.effort,
         subscription: access.method === 'subscription',
       };
@@ -127,10 +131,10 @@ export function createPiMemoryCurator(options: {
     get configured() {
       return options.configured?.() ?? Boolean(options.apiKey);
     },
-    async curate({ task, instructions, input, images }, signal, report) {
+    async curate({ task, instructions, input, images, automatic = true }, signal, report) {
       signal?.throwIfAborted();
       if (options.resolve) loaded = undefined;
-      loaded ??= load().catch((error) => {
+      loaded ??= load(automatic).catch((error) => {
         loaded = undefined;
         throw error;
       });

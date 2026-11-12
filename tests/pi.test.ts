@@ -5029,7 +5029,17 @@ test('native account catalogs never send a provider key to a different service o
         assert.equal(String(input), destination);
         assert.equal(new Headers(init?.headers).get('authorization'), `Bearer ${key}`);
         assert.equal(init?.redirect, 'error');
-        if (status !== 200) return Response.json({ message: `Synthetic ${key}` }, { status });
+        if (status !== 200)
+          return Response.json(
+            { message: `Synthetic ${key}` },
+            {
+              status,
+              headers: {
+                'content-type':
+                  status === 503 ? 'application/problem+json' : 'Application/JSON; charset=utf-8',
+              },
+            },
+          );
         const [allowed, unavailable] = await backend.catalog(provider, 'api_key');
         const data = [
           { id: allowed.choice.id },
@@ -7325,16 +7335,18 @@ test('model requests refuse oversized payloads before dispatch and retain transp
     assert.equal(calls, 0);
     assert.equal(requestFacts(oversized)!.requestPhase, 'prepare');
   }
-  const { runtime, model } = await createPiModelRuntime(
-    smallContextAccess('compatible', 'fixture-disconnect', 131072),
-  );
-  const failed = await runtime.completeSimple(model, {
-    messages: [{ role: 'user', content: 'Read synthetic data.', timestamp: 1 }],
-  });
-  assert.equal(failed.stopReason, 'error');
-  assert.equal(calls, 1);
-  assert.match(failed.errorMessage ?? '', /transport cause: ECONNRESET/);
-  assert.match(failed.errorMessage ?? '', /request phase: request/);
+  for (const [index, provider] of (['compatible', 'openrouter'] as const).entries()) {
+    const { runtime, model } = await createPiModelRuntime(
+      smallContextAccess(provider, 'fixture-disconnect', 131072),
+    );
+    const failed = await runtime.completeSimple(model, {
+      messages: [{ role: 'user', content: 'Read synthetic data.', timestamp: 1 }],
+    });
+    assert.equal(failed.stopReason, 'error');
+    assert.equal(calls, index + 1);
+    assert.match(failed.errorMessage ?? '', /transport cause: ECONNRESET/);
+    assert.match(failed.errorMessage ?? '', /request phase: request/);
+  }
 });
 
 test('Groq Qwen finishes a task through a tool call with supported message roles', async (t) => {

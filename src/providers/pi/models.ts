@@ -1164,6 +1164,13 @@ export async function createPiModelRuntime(
     let status: number | undefined;
     let transportCause: string | undefined;
     let completeRequest: ((error?: string) => Promise<void>) | undefined;
+    const guardedFetch =
+      access.provider === 'compatible' ||
+      access.provider === 'radius' ||
+      access.provider === 'cloudflare-workers-ai' ||
+      access.provider === 'cloudflare-ai-gateway' ||
+      (access.provider === 'openai' && !subscription) ||
+      Boolean(usage);
     const upstream = stream(target, audio?.context ?? context, {
       ...options,
       maxTokens:
@@ -1186,12 +1193,19 @@ export async function createPiModelRuntime(
       ...(target !== model
         ? { reasoning: access.textModel!.effort === 'off' ? undefined : access.textModel!.effort }
         : {}),
-      ...(access.provider === 'compatible' ||
-      access.provider === 'radius' ||
-      access.provider === 'cloudflare-workers-ai' ||
-      access.provider === 'cloudflare-ai-gateway' ||
-      (access.provider === 'openai' && !subscription) ||
-      usage
+      ...(guardedFetch ||
+      (
+        [
+          'openai-completions',
+          'openai-responses',
+          'openai-codex-responses',
+          'azure-openai-responses',
+          'anthropic-messages',
+          'mistral-conversations',
+          'pi-messages',
+          'openrouter-images',
+        ] as const
+      ).some((api) => hasApi(target, api))
         ? {
             fetch: async (input: string | URL | Request, init?: RequestInit) => {
               const headers = new Headers(init?.headers);
@@ -1200,8 +1214,7 @@ export async function createPiModelRuntime(
               phase = 'request';
               const response = await (options?.fetch ?? fetch)(input, {
                 ...init,
-                headers,
-                redirect: 'error',
+                ...(guardedFetch ? { headers, redirect: 'error' } : {}),
                 ...(access.provider === 'compatible'
                   ? {
                       dispatcher: (endpointConnections ??= new Dispatcher1Wrapper(

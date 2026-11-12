@@ -67,7 +67,7 @@ If Ollama does not report its thinking controls, Nod uses the server's default i
 
 Helper requests use Pi's bounded retry policy. Invalid requests, account limits, and authentication failures do not get unconditional retries. Provider-client retries remain off. A model retry does not repeat a turn or a completed tool action.
 
-The model adapter uses supported HTTP and stream hooks to record the observed request phase. Available transport cause codes are retained. An absent cause stays unknown. No provider transport or dependency is replaced to obtain missing details.
+The model adapter uses supported HTTP and stream hooks to record the observed request phase. Available transport cause codes are retained. An absent cause stays unknown. Google's adapters reject custom fetch hooks. Their transport failures can therefore retain only the last observed payload phase. No provider transport or dependency is replaced to obtain missing details.
 
 When a clarification has a few known answers, Nod uses `ask_user` with clickable choices instead of listing them in prose. This includes choosing an account in chat. Open-ended questions need no choices. The runtime assigns each option an ID; each label contains its full meaning, with no hidden action payload. The owner can select one or several options when offered, or write their own answer. Sign-in method selection and credentials use the private sign-in flow. Choices never replace action approvals or browser handoffs. Channels, speech and rebuilt history retain the option text.
 

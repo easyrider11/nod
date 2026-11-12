@@ -890,8 +890,13 @@ export function createModelService(options: {
     },
     async automaticRequestsAllowed() {
       try {
-        const access = await service.resolve();
-        await access.prepareRequest?.(access.definition.choice.id, true);
+        for (const auxiliary of [false, true]) {
+          const access = await service.resolve(auxiliary);
+          await access.prepareRequest?.(
+            access.textModel?.definition.choice.id ?? access.definition.choice.id,
+            true,
+          );
+        }
         return true;
       } catch {
         return false;

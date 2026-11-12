@@ -2998,18 +2998,22 @@ describe('model connections', { skip: !process.env.TEST_DATABASE_URL }, () => {
     const { createPiModelRuntime } = await import('../src/providers/pi/models.ts');
     const definitions = await f.backend.catalog('google', 'api_key');
     const definition = definitions.find((item) => item.choice.id === 'gemini-3.8-flash')!;
+    const primary = {
+      ...definition,
+      choice: { ...definition.choice, id: 'fixture-google-primary', name: 'Synthetic primary' },
+      spec: { ...definition.spec, id: 'fixture-google-primary' },
+    };
     const backend = {
       ...f.backend,
-      catalog: async () => [
-        {
-          ...definition,
+      catalog: async () =>
+        [definition, primary].map((item) => ({
+          ...item,
           spec: {
-            ...definition.spec,
+            ...item.spec,
             api: 'openai-completions',
             baseUrl: 'https://model.example/v1',
           },
-        },
-      ],
+        })),
     };
     let service = await f.create('fixture-quota-owner', backend);
     const connectionId = await service.addKey('google', 'fixture-quota-key');
@@ -3056,6 +3060,10 @@ describe('model connections', { skip: !process.env.TEST_DATABASE_URL }, () => {
     };
     await assert.rejects(curator.curate(request), /quota/i);
     assert.equal(calls, 1);
+    const selection = service.view().selection!;
+    await service.select({ ...selection, modelId: primary.choice.id });
+    assert.equal(await service.automaticRequestsAllowed(), false);
+    await service.select(selection);
     await assert.rejects(curator.curate(request), /Automatic requests are paused/);
     assert.equal(calls, 1);
     await service.refreshCatalog(connectionId);
@@ -3094,6 +3102,22 @@ describe('model connections', { skip: !process.env.TEST_DATABASE_URL }, () => {
     assert.equal(await service.automaticRequestsAllowed(), false);
     await assert.rejects(curator.curate(request), /zero quota/);
     assert.equal(calls, 5);
+    const ledger = createLedger({
+      pool: { query: async () => ({ rows: [] }) } as never,
+      ownerId: 'fixture-quota-owner',
+    });
+    const scoped = ledger.curator(curator);
+    await assert.rejects(
+      ledger.withTurn(randomUUID(), () => scoped.curate(request)),
+      /zero quota/,
+    );
+    rejected = false;
+    assert.deepEqual(
+      await ledger.withTurn(randomUUID(), () => scoped.curate(request), false, false),
+      { ready: true },
+    );
+    assert.equal(calls, 6);
+    assert.equal(await service.automaticRequestsAllowed(), true);
   });
 
   test('model setup chooses capable defaults, preserves explicit choices and requires valid cloud accounts', async (t) => {

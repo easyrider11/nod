@@ -728,7 +728,7 @@ export function createPiAgent(options: {
           (pi: ExtensionAPI) =>
             pi.on('cache_warming_decision', async () => {
               try {
-                await access?.prepareRequest?.(model.id, true);
+                await access?.prepareRequest?.(connection?.textModel?.id ?? model.id, true);
               } catch {
                 return { action: 'stop' as const };
               }
