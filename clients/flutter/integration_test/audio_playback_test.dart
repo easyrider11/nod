@@ -2,16 +2,41 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:nod_client/core/attachments.dart';
+import 'package:nod_client/design_system/design_system.dart';
+import 'package:nod_client/features/chat/audio_message.dart';
+import 'package:nod_client/features/chat/audio_playback.dart';
 import 'package:path_provider/path_provider.dart';
+
+class LocalClipRepository implements NodAttachmentsRepository {
+  LocalClipRepository(this.file);
+
+  final File file;
+  int downloads = 0;
+
+  @override
+  Future<void> downloadAttachment(
+    NodArtifact artifact,
+    File destination, {
+    required Future<void> cancelled,
+  }) async {
+    downloads++;
+    await file.copy(destination.path);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'native player opens a synthetic WAV and supports playback pause and seek',
+    'voice bubble loads native duration before play and native playback supports pause and seek',
     (tester) async {
       final root = await (await getTemporaryDirectory()).createTemp(
         'nod-native-audio-test-',
@@ -49,6 +74,39 @@ void main() {
         }
         final file = await File('${root.path}/synthetic.wav')
             .writeAsBytes(bytes.buffer.asUint8List());
+        final repository = LocalClipRepository(file);
+        final artifact = NodArtifact(
+          id: 'synthetic-audio',
+          name: 'synthetic.wav',
+          mimeType: 'audio/wav',
+          size: bytes.lengthInBytes,
+        );
+        final playback = AudioPlayback(
+          artifact: artifact,
+          repository: repository,
+          temporaryDirectory: () async => root,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: NodTheme.light,
+            home: Scaffold(
+              body: AudioMessage(
+                artifact: artifact,
+                repository: repository,
+                playback: playback,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle(const Duration(milliseconds: 100));
+        expect(playback.error, isNull);
+        expect(playback.duration!.inMilliseconds, closeTo(2000, 100));
+        expect(playback.playing, false);
+        expect(playback.position, Duration.zero);
+        expect(repository.downloads, 1);
+        expect(find.text('0:00 / 0:02'), findsOneWidget);
+        expect(find.byTooltip('Play voice message'), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
         final duration = await player.setFilePath(file.path);
         expect(duration!.inMilliseconds, closeTo(2000, 100));
         await player.setVolume(0);
@@ -61,6 +119,7 @@ void main() {
         await player.seek(const Duration(seconds: 1));
         expect(player.position.inMilliseconds, closeTo(1000, 100));
       } finally {
+        await tester.pumpWidget(const SizedBox());
         await player.dispose();
         await root.delete(recursive: true);
       }

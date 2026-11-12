@@ -39,6 +39,7 @@ class _AudioMessageState extends State<AudioMessage>
     _playback =
         widget.playback ??
         AudioPlayback(artifact: widget.artifact, repository: widget.repository);
+    unawaited(_playback.prepare());
   }
 
   @override

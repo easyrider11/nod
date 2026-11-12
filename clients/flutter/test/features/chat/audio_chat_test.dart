@@ -307,7 +307,7 @@ void main() {
     size: 100,
   );
 
-  test('playback downloads lazily, pauses other clips, seeks and replays without redownloading', () async {
+  test('preparing loads duration silently, pauses other clips only on play, and reuses the download', () async {
     final root = await Directory.systemTemp.createTemp('nod-playback-test-');
     final repository = ClipRepository();
     final player = ClipPlayer();
@@ -325,17 +325,25 @@ void main() {
       temporaryDirectory: () async => root,
     );
     expect(repository.downloads, 0);
-    await playback.toggle();
+    await playback.prepare();
+    await playback.prepare();
     expect(repository.downloads, 1);
     expect(player.path, endsWith('/recording.wav'));
     expect(playback.duration, const Duration(seconds: 12));
+    expect(playback.playing, false);
+    expect(player.plays, 0);
+    await playback.toggle();
     expect(playback.playing, true);
+    await other.prepare();
+    expect(playback.playing, true);
+    expect(other.playing, false);
+    expect(otherPlayer.plays, 0);
     await playback.seek(const Duration(seconds: 4));
     expect(playback.position, const Duration(seconds: 4));
     await playback.toggle();
     expect(playback.playing, false);
     await playback.toggle();
-    expect(repository.downloads, 1);
+    expect(repository.downloads, 2);
     await other.toggle();
     expect(playback.playing, false);
     expect(other.playing, true);
@@ -367,7 +375,7 @@ void main() {
         playerFactory: () => player,
         temporaryDirectory: () async => root,
       );
-      final pending = playback.toggle();
+      final pending = playback.prepare();
       while (repository.downloads == 0) {
         await Future<void>.delayed(Duration.zero);
       }
@@ -392,7 +400,7 @@ void main() {
       playerFactory: () => player,
       temporaryDirectory: () async => root,
     );
-    await playback.toggle();
+    await playback.prepare();
     expect(playback.error, isNotNull);
     expect(await root.list().isEmpty, true);
     repository.fail = false;
@@ -431,11 +439,19 @@ void main() {
         ),
       );
       await tester.pumpWidget(mount(true));
+      for (var attempt = 0; attempt < 20 && playback.loading; attempt++) {
+        await tester.runAsync(() async {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        });
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
       expect(find.byTooltip('Play voice message'), findsOneWidget);
+      expect(find.text('0:00 / 0:12'), findsOneWidget);
+      expect(player.plays, 0);
       await tester.runAsync(playback.toggle);
       await tester.pumpAndSettle();
       expect(find.byTooltip('Pause voice message'), findsOneWidget);
-      expect(find.text('0:00 / 0:12'), findsOneWidget);
       await tester.tap(find.byTooltip('Pause voice message'));
       await tester.pumpAndSettle();
       expect(playback.playing, false);
@@ -474,9 +490,8 @@ void main() {
           home: Scaffold(body: NodChat(repository: backend)),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
       expect(find.byType(AudioMessage), findsOneWidget);
-      expect(find.byTooltip('Play voice message'), findsOneWidget);
       expect(find.textContaining('voice.wav'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },

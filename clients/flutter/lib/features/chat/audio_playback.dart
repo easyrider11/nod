@@ -131,6 +131,30 @@ class AudioPlayback extends ChangeNotifier {
     await player.open(file.path);
   }
 
+  Future<void> prepare() async {
+    if (_disposed || loading || _player != null) return;
+    loading = true;
+    error = null;
+    _notify();
+    try {
+      final work = _prepare();
+      _preparing = work;
+      try {
+        await work;
+      } finally {
+        _preparing = null;
+      }
+    } catch (_) {
+      if (!_disposed) {
+        error = 'Could not load this recording. Check your connection or try another audio format.';
+        await _close();
+      }
+    } finally {
+      loading = false;
+      _notify();
+    }
+  }
+
   Future<void> toggle() async {
     if (_disposed || loading) return;
     if (playing) {
@@ -140,21 +164,10 @@ class AudioPlayback extends ChangeNotifier {
     final previous = _active;
     _active = this;
     _wantPlay = true;
-    loading = true;
-    error = null;
-    _notify();
     try {
       if (previous != null && previous != this) await previous.pause();
-      if (_player == null) {
-        final work = _prepare();
-        _preparing = work;
-        try {
-          await work;
-        } finally {
-          _preparing = null;
-        }
-      }
-      if (_disposed || !_wantPlay || _active != this) return;
+      await prepare();
+      if (_disposed || !_wantPlay || _active != this || _player == null) return;
       if (_ended) {
         await _player!.seek(Duration.zero);
         _ended = false;
@@ -170,12 +183,9 @@ class AudioPlayback extends ChangeNotifier {
       );
     } catch (_) {
       if (!_disposed) {
-        error = 'Could not load this recording. Check your connection or try another audio format.';
-        await _close();
+        error = 'Could not play this recording. Try again.';
+        _notify();
       }
-    } finally {
-      loading = false;
-      _notify();
     }
   }
 

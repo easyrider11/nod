@@ -108,6 +108,8 @@ Run these commands from the repo root.
 
 Try chat and history, streamed replies, stop and reconnect, attachments, voice recording and playback, connected apps, schedules, and usage. The menu also opens **Tasks**, **Prepared**, **Private entry**, **Settings**, and **Vault**. Private entry and browser access also sit behind the info icon in the chat's top bar, not above the input. Send stays on the right of the composer; the input fills the remaining width, with attachment and microphone controls inside it. These use the same assistant and permissions as the web client.
 
+Voice-message bubbles load their audio into a temporary file when they appear, so the duration is available before you press **Play**. Loading doesn't start playback or interrupt another recording. Playback reuses the file, and leaving the bubble removes the temporary copy. If loading fails, press **Retry voice message** to try again.
+
 [Answer questions](/contribute/mobile-questions/) on their original messages, including questions from background tasks. **Tasks → Show in chat** opens the addressed message. [Task details](/contribute/mobile-tasks/) show results and let you stop, continue, rename, or schedule saved work. **Prepared** lists recent findings from the conversation, not every private draft.
 
 [Private entry](/contribute/mobile-private-entry/) sends sign-in values and payment approvals directly to the server's existing private routes. It also opens Nod's handed-off browser, with **Done** returning control to the waiting task. This isn't a separate mobile account. Never enter passwords, verification codes, or card details in chat.
@@ -176,7 +178,7 @@ printf 'Native audio log: %s/native-audio.log\n' "$results"
 )
 ```
 
-This requires the iOS toolchain and simulator described above. It creates a synthetic WAV in the app's temporary folder, tests muted native playback, pause, and seek, then disposes the player and deletes the file. It doesn't need Nod, a model, or an account, and it doesn't prove microphone recording, server audio delivery, or live voice conversations.
+This requires the iOS toolchain and simulator described above. It creates a synthetic WAV in the app's temporary folder and checks that the voice bubble shows its duration before playback. It then tests muted native playback, pause, and seek, disposes the players, and deletes the files. It doesn't need Nod, a model, or an account, and it doesn't prove microphone recording, server audio delivery, or live voice conversations.
 
 ## Run native synthetic recovery
 
