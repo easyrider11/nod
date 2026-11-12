@@ -110,6 +110,20 @@ function polarity(text: string) {
     .join('|');
 }
 
+function conflictingPolarity(text: string, start: string) {
+  const clauses = (value: string) => value.split(/[.!?\n]+/u).filter((clause) => clause.trim());
+  return clauses(text).some((answer) =>
+    clauses(start).some((acknowledgement) => {
+      if (polarity(answer) === polarity(acknowledgement)) return false;
+      const first = words(answer);
+      const second = words(acknowledgement);
+      const shorter = Math.min(first.size, second.size);
+      const shared = [...first].filter((word) => second.has(word)).length;
+      return (shared >= 2 && shared / shorter >= 0.5) || (shared === 1 && shorter === 1);
+    }),
+  );
+}
+
 export function resemblesTaskAcknowledgement(text: string, start: string, handoff = false) {
   const status =
     /^(?:(?:sure|ok(?:ay)?)[,.!\s]+)?(?:on it\b|i(?:['’]ll| will)\b|i(?:['’]m| am)\s+(?:going|working|starting)\b|i(?:['’]ve| have)\s+started\b|started\b|working\b)/iu.test(
@@ -117,7 +131,7 @@ export function resemblesTaskAcknowledgement(text: string, start: string, handof
     );
   return (
     !/[\p{N}€$£\n]|https?:\/\//iu.test(text) &&
-    polarity(text) === polarity(start) &&
+    !conflictingPolarity(text, start) &&
     (status ? overlap(text, start, 0.45, 0.4, 3) : handoff && nearDuplicate(text, start))
   );
 }
