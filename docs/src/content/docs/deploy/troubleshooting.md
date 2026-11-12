@@ -21,7 +21,9 @@ Docker isn't running, or Compose is too old. Start Docker (on a Mac, open Docker
 
 ### the --chmod option requires BuildKit
 
-Docker can't build the workspace and browser images because the Buildx plugin is missing. Docker Desktop includes it. Other setups, such as Colima with a Homebrew Docker CLI or a Linux package without `docker-buildx-plugin`, need it installed separately. [Install Buildx](https://github.com/docker/buildx#installing), check that `docker buildx version` prints a version, then run `pnpm start` again.
+Docker cannot build the workspace and browser images when BuildKit is unavailable or disabled. A missing Buildx plugin can cause this error. Docker Desktop includes it. Other setups, such as Colima with a Homebrew Docker CLI or a Linux package without `docker-buildx-plugin`, need it installed separately. [Install Buildx](https://github.com/docker/buildx#installing) and check that `docker buildx version` prints a version.
+
+If `DOCKER_BUILDKIT=0` is set in your environment, remove it or set it to `1` to enable BuildKit. Then run `pnpm start` again.
 
 ### NOD_POSTGRES_PASSWORD is missing a value
 
