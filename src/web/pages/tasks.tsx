@@ -375,16 +375,18 @@ export function TaskCard({
 
 function LoadError({
   what,
+  detail,
   refreshing,
   retry,
 }: {
   what: string;
+  detail?: string;
   refreshing: boolean;
   retry(): Promise<unknown>;
 }) {
   return (
     <Notice>
-      Could not load {what}.{' '}
+      Could not load {what}. {detail && <>{detail} </>}
       <Button variant="ghost" size="sm" disabled={refreshing} onClick={() => void retry()}>
         {refreshing ? 'Retrying…' : 'Try again'}
       </Button>
@@ -436,7 +438,12 @@ export function Scheduled({
         <LoadError what="tasks" refreshing={tasks.refreshing} retry={tasks.refresh} />
       )}
       {preferences.error && (
-        <LoadError what="rules" refreshing={preferences.refreshing} retry={preferences.refresh} />
+        <LoadError
+          what="rules"
+          detail={preferences.error}
+          refreshing={preferences.refreshing}
+          retry={preferences.refresh}
+        />
       )}
       {activityRule && (
         <section className="saved-plan activity-rule" aria-labelledby="activity-rule-title">
