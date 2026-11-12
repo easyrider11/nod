@@ -60,6 +60,41 @@ export function approvalTitle(action: string) {
   return { title, app, slug: action.split('_')[0]!.toLowerCase() };
 }
 
+export function gmailMessageTarget(result: unknown, expectedId: string) {
+  const object = (value: unknown): Record<string, unknown> | undefined =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  const outer = object(result);
+  if (!outer || outer.successful === false) return;
+  const data = object(outer.data) ?? outer;
+  const message = object(data.message) ?? data;
+  const id = message.id ?? message.messageId ?? message.emailId ?? message.message_id;
+  if (id !== expectedId) return;
+  const payload = object(message.payload);
+  const headers = Array.isArray(payload?.headers)
+    ? payload.headers
+    : Array.isArray(message.headers)
+      ? message.headers
+      : [];
+  const header = (name: string) =>
+    headers
+      .map(object)
+      .find((item) => typeof item?.name === 'string' && item.name.toLowerCase() === name)?.value;
+  const field = (...values: unknown[]) =>
+    values.find((value) => typeof value === 'string' && value.trim()) as string | undefined;
+  const subject = field(message.subject, header('subject'))?.trim().slice(0, 300);
+  const from = field(message.from, message.sender, header('from'))?.trim().slice(0, 320);
+  const to = field(message.to, message.recipient, header('to'))?.trim().slice(0, 320);
+  if (!subject && !from && !to) return;
+  return {
+    messageId: expectedId,
+    ...(subject ? { subject } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+  };
+}
+
 const fieldKeys: Array<[string, string[]]> = [
   ['To', ['recipient_email', 'to', 'extra_recipients']],
   ['Cc', ['cc']],

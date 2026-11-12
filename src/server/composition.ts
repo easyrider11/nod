@@ -149,6 +149,7 @@ import { loadPrivacyNoticeFile, registerPrivacyNotice } from './privacy.ts';
 import { initializeDatabase, pool } from './db.ts';
 import { events, refresh } from './events.ts';
 import { createIntegrations } from './integrations.ts';
+import { gmailMessageTarget } from './action-presentation.ts';
 import {
   createErrorRedactor,
   createRedactor,
@@ -1310,6 +1311,26 @@ async function initializeApplication(
                 : action.startsWith('NOD_')
                   ? personal.manage(action.slice('NOD_'.length), args, provenance)
                   : (async () => {
+                      const savedBinding = provenance.details?.verifiedBinding;
+                      const verifiedBinding =
+                        typeof savedBinding === 'string' ? savedBinding : undefined;
+                      if (action === 'GMAIL_DELETE_MESSAGE') {
+                        const currentBinding = await integrations
+                          .binding(String(args.connectionId ?? ''))
+                          .catch(() => {
+                            throw Object.assign(
+                              new Error(
+                                'Nod could not check the selected Gmail account for deletion.',
+                              ),
+                              { notRun: true },
+                            );
+                          });
+                        if (!verifiedBinding || currentBinding !== verifiedBinding)
+                          throw Object.assign(
+                            new Error('The selected Gmail account changed after confirmation.'),
+                            { notRun: true },
+                          );
+                      }
                       const turn = { threadId: provenance.threadId, turnId: provenance.turnId };
                       const ready = hasWorkspaceFiles(args)
                         ? await integrations
@@ -1327,6 +1348,7 @@ async function initializeApplication(
                         ready,
                         turn,
                         provenance.signal,
+                        action === 'GMAIL_DELETE_MESSAGE' ? verifiedBinding : undefined,
                       );
                       await ledger.action(provenance.turnId, action, { kind: 'approved' });
                       return privateEmailResult(
@@ -2172,6 +2194,61 @@ async function initializeApplication(
               )
             : undefined;
         const path = account?.accessPaths?.find((item) => item.id === prepared.pathId);
+        let target: ReturnType<typeof gmailMessageTarget>;
+        let deleteBinding: string | undefined;
+        if (verdict.confirm && action === 'GMAIL_DELETE_MESSAGE') {
+          const messageId = prepared.message_id;
+          const connectionId = prepared.connectionId;
+          if (
+            typeof messageId !== 'string' ||
+            !messageId.trim() ||
+            typeof connectionId !== 'string'
+          )
+            throw new Error('Nod cannot identify the Gmail message proposed for deletion.');
+          deleteBinding = await integrations.binding(connectionId);
+          if (!deleteBinding)
+            throw new Error('The selected Gmail account is no longer available for deletion.');
+          const metadataArgs = {
+            connectionId,
+            message_id: messageId,
+            format: 'metadata',
+            ...(typeof prepared.user_id === 'string' ? { user_id: prepared.user_id } : {}),
+          };
+          const readVerdict = await trust.check(
+            turn,
+            'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID',
+            metadataArgs,
+            options.signal,
+          );
+          if (readVerdict.confirm)
+            throw new Error(
+              readVerdict.reason === 'rule'
+                ? 'Your rules require confirmation before reading this Gmail message, so Nod did not identify it or propose deletion. Allow this read in your rules before asking to delete it.'
+                : 'Nod could not authorize the Gmail metadata read needed to identify this message, so it did not propose deletion.',
+            );
+          let observed: unknown;
+          try {
+            observed = await integrations.execute(
+              ownerId,
+              'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID',
+              metadataArgs,
+              turn,
+              options.signal,
+              deleteBinding,
+            );
+          } catch {
+            options.signal?.throwIfAborted();
+            throw new Error(
+              'Nod cannot verify which Gmail message this would delete, so it did not ask for approval or delete it.',
+            );
+          }
+          await ledger.action(turn.turnId, 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID', readVerdict.basis);
+          target = gmailMessageTarget(observed, messageId);
+          if (!target)
+            throw new Error(
+              'Nod cannot verify which Gmail message this would delete, so it did not ask for approval or delete it.',
+            );
+        }
         const result = await approvals.request(turn, action, prepared, {
           allowed: !verdict.confirm,
           expectedChatRevision:
@@ -2184,6 +2261,7 @@ async function initializeApplication(
               prepared,
               turn,
               options.signal,
+              deleteBinding,
             );
             await ledger.action(
               turn.turnId,
@@ -2203,6 +2281,8 @@ async function initializeApplication(
                   },
                 }
               : {}),
+            ...(target ? { target } : {}),
+            ...(deleteBinding ? { verifiedBinding: deleteBinding } : {}),
           },
         });
         return result;
