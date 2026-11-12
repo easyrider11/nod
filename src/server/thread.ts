@@ -1933,8 +1933,13 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
       mode: (await dependencies.audioReplies?.()) ?? defaultPreferences.speechReply,
       available: Boolean(dependencies.speech.configured),
     };
-    const scheduleCache =
-      turn.source === 'schedule' ? await dependencies.scheduleCache?.(turnId) : undefined;
+    let scheduleCache: RuntimeContext['scheduleCache'];
+    if (turn.source === 'schedule')
+      try {
+        scheduleCache = await dependencies.scheduleCache?.(turnId);
+      } catch (error) {
+        logFailure('schedule_cache_policy_failed', error, { threadId, turnId });
+      }
     const result = await dependencies.runTurn({
       threadId,
       turnId,

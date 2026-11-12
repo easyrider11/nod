@@ -214,7 +214,13 @@ Task IDs stay in the turn message. Pi supplies the workspace path after the shar
 
 For OpenAI API models that support explicit cache boundaries, Nod marks the end of the shared instructions before the workspace path. This boundary also covers tool definitions that precede the instructions. The request keeps implicit caching for the growing conversation and uses the provider's default cache lifetime.
 
-For Anthropic API models, Nod moves the system text's cache marker to that same boundary. The workspace path follows in a second text block. The request keeps the SDK's tool and conversation markers, cache lifetime and total number of markers. Disabled caching stays disabled.
+For ordinary Anthropic API turns, Nod moves the system text's cache marker to that same boundary. The workspace path follows in a second text block. The request keeps the SDK's tool and conversation markers, cache lifetime and total number of markers. Disabled caching stays disabled.
+
+### Scheduled turn caching
+
+Each scheduled run starts a separate Pi session. For Anthropic API models, Nod places owner context and unchanged request fields ahead of the task ledger, recent chat, current instruction and time. It marks the owner context and stable request prefix for caching, so a later run with the same prefix can reuse them even though the sessions are separate. The changing tail keeps the five-minute cache lifetime.
+
+For an enabled recurring schedule on its current revision, Nod chooses the stable prefix's lifetime from the planned gap between runs: five minutes for gaps up to five minutes, and one hour for gaps longer than five minutes and at most 55 minutes. Longer gaps and one-time schedules use the provider's default caching. A failed cadence lookup also uses default caching and does not stop the scheduled turn. The one-hour option has a higher cache-write cost, so it is reserved for intervals likely to reuse it.
 
 ChatGPT subscriptions and other model APIs keep their existing cache settings.
 
