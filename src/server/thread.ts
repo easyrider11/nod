@@ -61,6 +61,7 @@ import { spendingLimitReached, spendingLimitText } from './ledger.ts';
 import type { ExecutionEvent } from '../shared/execution.ts';
 import { lockKey } from './locks.ts';
 import { redactSecretText } from './redaction.ts';
+import { resemblesTaskAcknowledgement } from '../shared/task-ack.ts';
 
 const queue = 'thread-drain';
 const rasterTypes = new Set([
@@ -1685,7 +1686,7 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
   let explicitAudio = false;
   const published = new Map<string, Artifact>();
   let sourceMessageId: string | null = null;
-  let lastPlainReply: { id: string; sourceMessageId: string | null } | undefined;
+  const plainReplies: Array<{ id: string; text: string; sourceMessageId: string | null }> = [];
   const post = async (
     text: string,
     attachments: Artifact[] = [],
@@ -1745,7 +1746,8 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
       });
       const spoken = presentation && !text.trim() ? presentationText(presentation) : text;
       if (spoken.trim()) replies.push({ id, text: spoken, source });
-      lastPlainReply = plain && spoken.trim() ? { id, sourceMessageId: postedFor } : undefined;
+      if (plain && spoken.trim())
+        plainReplies.push({ id, text: spoken, sourceMessageId: postedFor });
     } catch (error) {
       if (rolledBack) await Promise.allSettled(cleanup.map((remove) => remove()));
       throw error;
@@ -2072,10 +2074,15 @@ async function executeTurn(turn: any, dependencies: ThreadDependencies) {
             ref,
             input,
             sourceMessageId,
-            (input as { action?: unknown })?.action === 'start' &&
-              sourceMessageId &&
-              lastPlainReply?.sourceMessageId === sourceMessageId
-              ? lastPlainReply.id
+            (input as { action?: unknown })?.action === 'start' && sourceMessageId
+              ? plainReplies.findLast(
+                  (reply) =>
+                    reply.sourceMessageId === sourceMessageId &&
+                    resemblesTaskAcknowledgement(
+                      reply.text,
+                      (input as { message?: string }).message ?? '',
+                    ),
+                )?.id
               : undefined,
           ),
         ),

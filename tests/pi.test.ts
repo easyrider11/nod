@@ -1950,6 +1950,16 @@ test('task handoff does not repeat acknowledgements and keeps independent final 
       expected: [],
     },
     {
+      name: 'Spanish task start alone',
+      earlyUpdate: false,
+      steer: false,
+      start:
+        'Ya he empezado a revisar tu buzón y preparar borradores de respuesta. No enviaré nada sin tu aprobación.',
+      final:
+        'Ya he empezado a revisar tu buzón y preparando borradores de respuesta. No enviaré nada sin tu aprobación.',
+      expected: [],
+    },
+    {
       name: 'independent answer',
       earlyUpdate: true,
       steer: false,
@@ -1969,6 +1979,38 @@ test('task handoff does not repeat acknowledgements and keeps independent final 
         acknowledgement,
         "I've started reviewing your synthetic inbox. I'll flag urgent email and save draft replies. Nothing gets sent without your OK. I found 3 urgent messages.",
       ],
+    },
+    {
+      name: 'negated finding after task start',
+      earlyUpdate: false,
+      steer: false,
+      start: "I've started checking the synthetic invoices. Every invoice is approved.",
+      final: "I've started checking the synthetic invoices. Every invoice is not approved.",
+      expected: ["I've started checking the synthetic invoices. Every invoice is not approved."],
+    },
+    {
+      name: 'removed negation after task start',
+      earlyUpdate: false,
+      steer: false,
+      start: "I've started checking the synthetic invoices. No invoice is approved.",
+      final: "I've started checking the synthetic invoices. Every invoice is approved.",
+      expected: ["I've started checking the synthetic invoices. Every invoice is approved."],
+    },
+    {
+      name: 'changed count after task start',
+      earlyUpdate: false,
+      steer: false,
+      start: "I've started checking all 12 synthetic invoices for overdue items.",
+      final: "I've started checking all 2 synthetic invoices for overdue items.",
+      expected: ["I've started checking all 2 synthetic invoices for overdue items."],
+    },
+    {
+      name: 'qualitative finding after task start',
+      earlyUpdate: false,
+      steer: false,
+      start: "I've started reviewing your synthetic inbox and will flag urgent messages.",
+      final: "I've started reviewing your synthetic inbox and will flag fraudulent messages.",
+      expected: ["I've started reviewing your synthetic inbox and will flag fraudulent messages."],
     },
     {
       name: 'steered answer',
@@ -2017,7 +2059,7 @@ test('task handoff does not repeat acknowledgements and keeps independent final 
                   title: 'Review synthetic inbox',
                   doneWhen: 'Urgent messages identified and draft replies saved',
                   now: 'Reviewing synthetic inbox',
-                  message: startMessage,
+                  message: 'start' in scenario ? scenario.start : startMessage,
                 });
               if (!('steerBefore' in scenario && scenario.steerBefore))
                 incoming.push(...((await input.nextMessages?.()) ?? []).map((item) => item.text));

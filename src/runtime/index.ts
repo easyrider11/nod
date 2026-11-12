@@ -62,7 +62,6 @@ const parallelTools = new Set([
   'skills',
   'apps',
   'manage_personal_context',
-  'task',
   'react_to_message',
 ]);
 const orderedTools = new Set([
@@ -1091,7 +1090,7 @@ export function createAgentRuntime(dependencies: {
               taskStart?.revision === requestRevision &&
               !replyOwed &&
               [taskStart.message, taskStart.previousReply].some((message) =>
-                repeatsTaskStart(event.text, message),
+                repeatsTaskStart(event.text, message, context.prompt),
               )
             )
               streamSubmitted = true;
