@@ -216,12 +216,6 @@ For OpenAI API models that support explicit cache boundaries, Nod marks the end 
 
 For ordinary Anthropic API turns, Nod moves the system text's cache marker to that same boundary. The workspace path follows in a second text block. The request keeps the SDK's tool and conversation markers, cache lifetime and total number of markers. Disabled caching stays disabled.
 
-### Scheduled turn caching
-
-Each scheduled run starts a separate Pi session. For Anthropic API models, Nod places owner context and unchanged request fields ahead of the task ledger, recent chat, current instruction and time. It marks the owner context and stable request prefix for caching, so a later run with the same prefix can reuse them even though the sessions are separate. The changing tail keeps the five-minute cache lifetime.
-
-For an enabled recurring schedule on its current revision, Nod chooses the stable prefix's lifetime from the planned gap between runs: five minutes for gaps up to five minutes, and one hour for gaps longer than five minutes and at most 55 minutes. Longer gaps and one-time schedules use the provider's default caching. A failed cadence lookup also uses default caching and does not stop the scheduled turn. The one-hour option has a higher cache-write cost, so it is reserved for intervals likely to reuse it.
-
 ChatGPT subscriptions and other model APIs keep their existing cache settings.
 
 When a model's cache lifetime is known, as for Anthropic, the chat's Pi session stays open after a turn so Pi can keep a large conversation's cache warm for up to 30 minutes. Each refresh gets one Usage record, even if it fails or is cancelled. A cancelled refresh stays unknown if its usage has not arrived. Stop does not wait for a later reply.
@@ -233,6 +227,12 @@ The owner context is a message of its own, never part of the system prompt, so a
 - Compaction summaries leave the owner context out. A session that compacts it away gets it again with its next request.
 
 Providers that take a prompt cache key, such as OpenAI, get the same one from every session of a thread: a keyed hash of the thread ID that changes when Nod restarts. When a session's system prompt and tools match a recent request from the same thread, as they do for back-to-back background runs even after memory changes, the provider reads them from its cache and bills them at its cheaper cache-read rate. The code is in [`src/providers/pi/index.ts`](https://github.com/n8n-io/nod/blob/main/src/providers/pi/index.ts).
+
+### Scheduled turn caching
+
+Each scheduled run starts a separate Pi session. For Anthropic API models, Nod places owner context and unchanged request fields ahead of the task ledger, recent chat, current instruction and time. It marks the owner context and stable request prefix for caching, so a later run with the same prefix can reuse them even though the sessions are separate. The changing tail keeps the five-minute cache lifetime.
+
+For an enabled recurring schedule on its current revision, Nod chooses the stable prefix's lifetime from the planned gap between runs: five minutes for gaps up to five minutes, and one hour for gaps longer than five minutes and at most 55 minutes. Longer gaps and one-time schedules use the provider's default caching. A failed cadence lookup also uses default caching and does not stop the scheduled turn. Anthropic [bills cached input at its cache-read rate](https://platform.claude.com/docs/en/build-with-claude/prompt-caching), while the one-hour option has a higher cache-write cost, so it is reserved for intervals likely to reuse it.
 
 ## Message cadence
 
