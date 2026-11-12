@@ -472,17 +472,19 @@ test(
         (error: unknown) => error instanceof VaultUseError && error.statusCode === 409,
       );
       assert.equal(websiteSubmissions, 1);
-      const disconnected = { ...use, id: randomUUID() };
-      await withFailureLog(record, async () => {
-        await assert.rejects(
-          uses.run(disconnected, {
-            perform: async () => {
-              throw Object.assign(new Error('fixture-private-value'), { code: 'ECONNRESET' });
-            },
-          }),
-          uncertain,
-        );
-      });
+      for (const code of ['ECONNRESET', 'UND_ERR_SOCKET']) {
+        const disconnected = { ...use, id: randomUUID() };
+        await withFailureLog(record, async () => {
+          await assert.rejects(
+            uses.run(disconnected, {
+              perform: async () => {
+                throw Object.assign(new Error('fixture-private-value'), { code });
+              },
+            }),
+            uncertain,
+          );
+        });
+      }
       const unfinished = { ...use, id: randomUUID() };
       await withFailureLog(record, async () => {
         await assert.rejects(
@@ -534,6 +536,7 @@ test(
             cause: 'browser',
             browserCode: 'browser_card_changed',
           },
+          { stage: 'entry', kind: 'password', cause: 'transport' },
           { stage: 'entry', kind: 'password', cause: 'transport' },
           { stage: 'completion', kind: 'password', cause: 'operation' },
           { stage: 'entry', kind: 'other', cause: 'browser' },

@@ -43,9 +43,20 @@ function failureCause(error: unknown) {
   if (!(error instanceof Error)) return 'unknown';
   try {
     if (
-      ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE'].includes(
-        (error as Error & { code?: string }).code ?? '',
-      )
+      [
+        'ECONNRESET',
+        'ECONNREFUSED',
+        'EHOSTUNREACH',
+        'ENETUNREACH',
+        'ENOTFOUND',
+        'EAI_AGAIN',
+        'ETIMEDOUT',
+        'EPIPE',
+        'UND_ERR_CONNECT_TIMEOUT',
+        'UND_ERR_HEADERS_TIMEOUT',
+        'UND_ERR_BODY_TIMEOUT',
+        'UND_ERR_SOCKET',
+      ].includes((error as Error & { code?: string }).code ?? '')
     )
       return 'transport';
   } catch {}
